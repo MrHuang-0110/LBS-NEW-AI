@@ -1,0 +1,6 @@
+pikascript-core==v1.13.4
+PikaStdLib==v1.13.4
+_thread==v0.0.7
+time==v0.2.2
+math==v0.1.1
+random==v0.1.4
