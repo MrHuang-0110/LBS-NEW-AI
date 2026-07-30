@@ -809,10 +809,14 @@ void newAiMonitor(void) {
 								case DEV_ID_CAMER:
 								{
 								DEV_CAMER *dev_camer = read_camer((SensorBase *)portDev[i].sensors);
-								p = json_objOpen(p,"camer",&remLen);
-								 p = json_int(p, "mode",dev_camer->mode, &remLen);
-								 switch((uint8_t)dev_camer->mode)
-								 {
+								p = json_objOpen(p, "camera", &remLen);
+								p = json_int(p, "mode", dev_camer->mode, &remLen);
+
+								// Open configs array
+								p = json_arrOpen(p, "configs", &remLen);
+
+								switch((uint8_t)dev_camer->mode)
+								{
 									case CAMER_MENU_TYPE:
 									case CAMER_MODE_TYPE:
 									case CAMER_FACE_TYPE:
@@ -823,38 +827,28 @@ void newAiMonitor(void) {
 									case CAMER_GESTURE_TYPE:
 									case CAMER_BODY_TYPE:
 									case CAMER_OBJECT_BODY_TYPE:
-									case CAMER_PHOTO_TYPE:	
-									p = json_int(p, "id1",dev_camer->data[0], &remLen); 
-									p = json_int(p, "x",dev_camer->data[1]<<8|dev_camer->data[2], &remLen); 
-									p = json_int(p, "y",dev_camer->data[3]<<8|dev_camer->data[4], &remLen); 
-									p = json_int(p, "w",dev_camer->data[5]<<8|dev_camer->data[6], &remLen); 
-									p = json_int(p, "h",dev_camer->data[7]<<8|dev_camer->data[8], &remLen); 
-									p = json_int(p, "pp",dev_camer->data[9], &remLen); 
+									case CAMER_PHOTO_TYPE:
+									{
+										const char *id_names[4] = {"id1", "id2", "id3", "id4"};
+										for(int det = 0; det < 4; det++)
+										{
+											int base = det * 10;
+											p = json_objOpen(p, NULL, &remLen);
+											p = json_int(p, id_names[det], dev_camer->data[base], &remLen);
+											p = json_int(p, "x", dev_camer->data[base+1]<<8|dev_camer->data[base+2], &remLen);
+											p = json_int(p, "y", dev_camer->data[base+3]<<8|dev_camer->data[base+4], &remLen);
+											p = json_int(p, "w", dev_camer->data[base+5]<<8|dev_camer->data[base+6], &remLen);
+											p = json_int(p, "h", dev_camer->data[base+7]<<8|dev_camer->data[base+8], &remLen);
+											p = json_int(p, "pp", dev_camer->data[base+9], &remLen);
+											p = json_objClose(p, &remLen);
+										}
+										break;
+									}
+								}
 
-									p = json_int(p, "id2",dev_camer->data[10], &remLen); 
-									p = json_int(p, "x",dev_camer->data[11]<<8|dev_camer->data[12], &remLen); 
-									p = json_int(p, "y",dev_camer->data[13]<<8|dev_camer->data[14], &remLen); 
-									p = json_int(p, "w",dev_camer->data[15]<<8|dev_camer->data[16], &remLen); 
-									p = json_int(p, "h",dev_camer->data[17]<<8|dev_camer->data[18], &remLen); 
-									p = json_int(p, "pp",dev_camer->data[19], &remLen); 
-
-									p = json_int(p, "id3",dev_camer->data[20], &remLen); 
-									p = json_int(p, "x",dev_camer->data[21]<<8|dev_camer->data[22], &remLen); 
-									p = json_int(p, "y",dev_camer->data[23]<<8|dev_camer->data[24], &remLen); 
-									p = json_int(p, "w",dev_camer->data[25]<<8|dev_camer->data[26], &remLen); 
-									p = json_int(p, "h",dev_camer->data[27]<<8|dev_camer->data[28], &remLen); 
-									p = json_int(p, "pp",dev_camer->data[29], &remLen); 
-							 
-									p = json_int(p, "id4",dev_camer->data[30], &remLen); 
-									p = json_int(p, "x",dev_camer->data[31]<<8|dev_camer->data[32], &remLen); 
-									p = json_int(p, "y",dev_camer->data[33]<<8|dev_camer->data[34], &remLen); 
-									p = json_int(p, "w",dev_camer->data[35]<<8|dev_camer->data[36], &remLen); 
-									p = json_int(p, "h",dev_camer->data[37]<<8|dev_camer->data[38], &remLen); 
-									p = json_int(p, "pp",dev_camer->data[39], &remLen);
-									 break;
-								 }
-								 p = json_objClose(p, &remLen);
-								 break;                                   
+								p = json_arrClose(p, &remLen);
+								p = json_objClose(p, &remLen);
+								break;
 								}
             }
  						
