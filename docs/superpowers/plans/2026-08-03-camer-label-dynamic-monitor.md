@@ -282,10 +282,12 @@ git commit -m "feat(camer): dynamic N configs in monitor JSON for label mode"
 
 ### Task 4: PikaScript 接口 — cam_count 新增 + cam_data 边界修改
 
+> **⚠️ 分工约定**:用户手动运行 `pikaPackage.exe` 重新生成绑定 (Task 4 Step 4)。子代理**只改源码** (`_camer.pyi` + `_camer.c`),**不运行** pikaPackage、**不改** `pikascript-api/` 生成物。
+
 **Files:**
-- Modify: `python/_camer.pyi`
-- Modify: `python/pikascript-lib/camer/_camer.c:26-58`
-- Regenerate: `python/pikascript-api/_camer.h`、`__pikaBinding.c` (pikaPackage.exe 生成,勿手改)
+- Modify: `python/_camer.pyi` (子代理)
+- Modify: `python/pikascript-lib/camer/_camer.c:26-58` (子代理)
+- Regenerate: `python/pikascript-api/_camer.h`、`__pikaBinding.c` (**用户**运行 pikaPackage.exe 生成)
 
 **Interfaces:**
 - Consumes: `DEV_CAMER.n_targets` (Task 1)、`read_camer()`、`getDevBase()`
@@ -305,25 +307,7 @@ def changer_camer_mode(port:float,mode:float):...
 def send_hw_mode(port:float,mode:float):...
 ```
 
-- [ ] **Step 2: 重跑 pikaPackage.exe 重新生成绑定**
-
-在 `python/` 目录运行:
-
-```bash
-cd python && ./pikaPackage.exe
-```
-
-预期:命令成功退出。
-验证生成物 — `python/pikascript-api/_camer.h` 应出现新原型:
-
-```c
-pika_float _camer_cam_count(PikaObj *self, pika_float port);
-```
-
-`python/pikascript-api/__pikaBinding.c` 应出现 `_camer_cam_count` 注册行。
-(若 pikaPackage 输出报错,先恢复 .pyi 并检查语法。)
-
-- [ ] **Step 3: 改 `_camer_cam_data` 边界检查**
+- [ ] **Step 2: 改 `_camer_cam_data` 边界检查**
 
 `python/pikascript-lib/camer/_camer.c:26-58`,将:
 
@@ -350,7 +334,7 @@ pika_float _camer_cam_count(PikaObj *self, pika_float port);
 
 其余 switch (field 0~5 的偏移计算) 不动。
 
-- [ ] **Step 4: 新增 `_camer_cam_count`**
+- [ ] **Step 3: 新增 `_camer_cam_count`**
 
 在 `_camer_cam_data` 函数之后追加:
 
@@ -363,9 +347,29 @@ pika_float _camer_cam_count(PikaObj *self, pika_float port)
 }
 ```
 
-- [ ] **Step 5: Keil 构建验证**
+- [ ] **Step 4: [用户] 手动运行 pikaPackage.exe 重新生成绑定**
 
-构建目标 `STM32H723`,预期 0 error。确认 `_camer_cam_count` 符号被链接(无 unresolved 错误)。
+用户在 `python/` 目录手动运行:
+
+```bash
+cd python && ./pikaPackage.exe
+```
+
+预期:命令成功退出。
+验证生成物 — `python/pikascript-api/_camer.h` 应出现新原型:
+
+```c
+pika_float _camer_cam_count(PikaObj *self, pika_float port);
+```
+
+`python/pikascript-api/__pikaBinding.c` 应出现 `_camer_cam_count` 注册行。
+(若 pikaPackage 输出报错,先恢复 .pyi 并检查语法。)
+
+**子代理在此停下,把 Step 1-3 的改动展示给用户,等用户跑完 pikaPackage.exe 并确认后再继续 Step 5。**
+
+- [ ] **Step 5: [用户] Keil 构建验证**
+
+用户构建目标 `STM32H723`,预期 0 error。确认 `_camer_cam_count` 符号被链接(无 unresolved 错误)。
 
 - [ ] **Step 6: 提交**
 
@@ -373,6 +377,8 @@ pika_float _camer_cam_count(PikaObj *self, pika_float port)
 git add python/_camer.pyi python/pikascript-lib/camer/_camer.c python/pikascript-api/_camer.h python/pikascript-api/__pikaBinding.c
 git commit -m "feat(camer): add cam_count and dynamic bounds to cam_data PikaScript API"
 ```
+
+(提交由用户在确认构建通过后执行;若用户已自行提交,子代理跳过。)
 
 ---
 
