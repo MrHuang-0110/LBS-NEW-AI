@@ -86,8 +86,11 @@ static void port_data_parsing(int portIndex,int id,int index,uint8_t *data)
 			 case 0x10:case 0x11:case 0x12:case 0x13:
 			 case 0x0C:case 0x0D:
 		 case DEV_PORT_INFO_DATA:
-			  portDev[portIndex].sensors->findIndex = index;
-			  set_sensor_parameter(portDev[portIndex].sensors,data);			
+			  if(portDev[portIndex].sensors != NULL)
+			  {
+				  portDev[portIndex].sensors->findIndex = index;
+				  set_sensor_parameter(portDev[portIndex].sensors,data);
+			  }
      break;
 
 		 /*sensord updata*/
@@ -110,17 +113,20 @@ static void port_data_parsing(int portIndex,int id,int index,uint8_t *data)
 		 
 		 default:break;
 	 }
-     if(portDev[portIndex].sensors->type == DEV_ID_CAMER)
+     if(portDev[portIndex].sensors != NULL)
      {
-        portDev[portIndex].portTimeOutTick = 50;
-     }
-		 else if(portDev[portIndex].sensors->type == DEV_ID_GRAY_V2)
-		 { 
-		     portDev[portIndex].portTimeOutTick = 50;
-		 }
-		 else
-     {
-        portDev[portIndex].portTimeOutTick = 10;
+         if(portDev[portIndex].sensors->type == DEV_ID_CAMER)
+         {
+             portDev[portIndex].portTimeOutTick = 50;
+         }
+         else if(portDev[portIndex].sensors->type == DEV_ID_GRAY_V2)
+         {
+             portDev[portIndex].portTimeOutTick = 50;
+         }
+         else
+         {
+             portDev[portIndex].portTimeOutTick = 10;
+         }
      }
 	  
 }
@@ -136,13 +142,18 @@ uint8_t calculate_checksum(const uint8_t *data, size_t length) {
 
 uint8_t dataAgreeAnalys(_AGREEMENT *_agreement_,uint8_t *data,uint16_t length)
 { 
-  if(data[0] != 0x5A && data[length - 1] != 0xA5)
-   	  return AGREE_MEN_ERROR;
-
-   if(length <8)
+	 /* 协议最小帧 = 5A|sID|oID|len|type|crc|A5 共 7 字节(0 载荷) */
+   if(length < 7)
 		  return AGREE_MEN_ERROR;
 
-	 static uint8_t _mycrc_;
+   if(data[0] != 0x5A || data[length - 1] != 0xA5)
+   	  return AGREE_MEN_ERROR;
+
+	 /* 帧长字段与总长一致性:总长 = len字段 + 7 */
+	 if((uint16_t)data[3] + 7 != length)
+		  return AGREE_MEN_ERROR;
+
+	 uint8_t _mycrc_;
    _mycrc_ = calculate_checksum((const uint8_t *)data,length - 2);
 
    if(_mycrc_!=data[length - 2])
@@ -819,55 +830,21 @@ void newAiMonitor(void) {
 								// Open configs array
 								p = json_arrOpen(p, "configs", &remLen);
 
-								switch((uint8_t)dev_camer->mode)
+								/* 协议:所有 stream 模式统一动态 N 组(按帧 length 解析,键名 id/x/y/w/h/conf);
+								   0 载荷模式(主菜单/相机/图像分类) N=0 → 空数组 */
+								int n = (int)dev_camer->n_targets;
+								for(int det = 0; det < n; det++)
 								{
-									case CAMER_LABE_TYPE:
-									{
-										/* 动态 N 组:按本帧目标数输出,不补齐 */
-										int n = (int)dev_camer->n_targets;
-										for(int det = 0; det < n; det++)
-										{
-											int base = det * 10;
-											p = json_objOpen(p, NULL, &remLen);
-											p = json_int(p, "id", dev_camer->data[base], &remLen);
-											p = json_int(p, "x", dev_camer->data[base+1]<<8|dev_camer->data[base+2], &remLen);
-											p = json_int(p, "y", dev_camer->data[base+3]<<8|dev_camer->data[base+4], &remLen);
-											p = json_int(p, "w", dev_camer->data[base+5]<<8|dev_camer->data[base+6], &remLen);
-											p = json_int(p, "h", dev_camer->data[base+7]<<8|dev_camer->data[base+8], &remLen);
-											p = json_int(p, "conf", dev_camer->data[base+9], &remLen);
-											p = json_objClose(p, &remLen);
-										}
-										break;
-									}
-									case CAMER_MENU_TYPE:
-									case CAMER_MODE_TYPE:
-									case CAMER_FACE_TYPE:
-									case CAMER_OBJECT_TYPE:
-									case CAMER_COLOR_TYPE:
-									case CAMER_WAY_TYPE:
-									case CAMER_GESTURE_TYPE:
-									case CAMER_BODY_TYPE:
-									case CAMER_OBJECT_BODY_TYPE:
-									case CAMER_PHOTO_TYPE:
-									{
-										/* 原有固定 4 组,不动 */
-										const char *id_names[4] = {"id1", "id2", "id3", "id4"};
-										for(int det = 0; det < 4; det++)
-										{
-											int base = det * 10;
-											p = json_objOpen(p, NULL, &remLen);
-											p = json_int(p, id_names[det], dev_camer->data[base], &remLen);
-											p = json_int(p, "x", dev_camer->data[base+1]<<8|dev_camer->data[base+2], &remLen);
-											p = json_int(p, "y", dev_camer->data[base+3]<<8|dev_camer->data[base+4], &remLen);
-											p = json_int(p, "w", dev_camer->data[base+5]<<8|dev_camer->data[base+6], &remLen);
-											p = json_int(p, "h", dev_camer->data[base+7]<<8|dev_camer->data[base+8], &remLen);
-											p = json_int(p, "pp", dev_camer->data[base+9], &remLen);
-											p = json_objClose(p, &remLen);
-										}
-										break;
-									}
+									int base = det * 10;
+									p = json_objOpen(p, NULL, &remLen);
+									p = json_int(p, "id", dev_camer->data[base], &remLen);
+									p = json_int(p, "x", dev_camer->data[base+1]<<8|dev_camer->data[base+2], &remLen);
+									p = json_int(p, "y", dev_camer->data[base+3]<<8|dev_camer->data[base+4], &remLen);
+									p = json_int(p, "w", dev_camer->data[base+5]<<8|dev_camer->data[base+6], &remLen);
+									p = json_int(p, "h", dev_camer->data[base+7]<<8|dev_camer->data[base+8], &remLen);
+									p = json_int(p, "conf", dev_camer->data[base+9], &remLen);
+									p = json_objClose(p, &remLen);
 								}
-
 								p = json_arrClose(p, &remLen);
 								p = json_objClose(p, &remLen);
 								break;
