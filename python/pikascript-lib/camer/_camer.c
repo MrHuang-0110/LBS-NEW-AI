@@ -30,9 +30,12 @@ pika_float _camer_cam_data(PikaObj *self, pika_float port, pika_float id, pika_f
     if (camer == NULL) return 0.0f;
 
     // 2. 参数范围检查
+    // id 是组序号 (0~N-1), 返回该组ID值; 组序号范围 (0~25)
     int group = (int)id;
     int field = (int)obj_id;
-    if (group < 0 || group >= 4 || field < 0 || field >= 6)
+    if (group < 0 || group > 25 || field < 0 || field >= 6)
+        return 0.0f;
+    if (group >= (int)camer->n_targets)   /* 此序号不存在 → 0 */
         return 0.0f;
 
     // 3. 获取数组指针
@@ -55,4 +58,11 @@ pika_float _camer_cam_data(PikaObj *self, pika_float port, pika_float id, pika_f
             return (pika_float)data[offset + 9];
     }
 		return 0;
+}
+
+pika_float _camer_cam_count(PikaObj *self, pika_float port)
+{
+    DEV_CAMER *camer = read_camer((SensorBase *)getDevBase(port));
+    if (camer == NULL) return 0.0f;
+    return (pika_float)camer->n_targets;
 }

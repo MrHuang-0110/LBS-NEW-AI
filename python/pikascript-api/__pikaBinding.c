@@ -1721,6 +1721,16 @@ Arg *PikaStdTask_Task(PikaObj *self){
 #endif
 
 #ifndef PIKA_MODULE__CAMER_DISABLE
+void _camer_cam_countMethod(PikaObj *self, Args *_args_){
+    pika_float port = args_getFloat(_args_, "port");
+    pika_float res = _camer_cam_count(self, port);
+    method_returnFloat(_args_, res);
+}
+method_typedef(
+    _camer_cam_count,
+    "cam_count", "port"
+);
+
 void _camer_cam_dataMethod(PikaObj *self, Args *_args_){
     pika_float port = args_getFloat(_args_, "port");
     pika_float id = args_getFloat(_args_, "id");
@@ -1757,6 +1767,7 @@ class_def(_camer){
     __BEFORE_MOETHOD_DEF
     method_def(_camer_cam_data, 153847919),
     method_def(_camer_changer_camer_mode, 243993096),
+    method_def(_camer_cam_count, 781332862),
     method_def(_camer_send_hw_mode, 1062276529),
 };
 class_inhert(_camer, TinyObj);
