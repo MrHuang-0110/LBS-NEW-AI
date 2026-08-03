@@ -117,7 +117,7 @@ bool identify_and_bind(__PORT *manager,uint8_t devId,uint8_t index) {
 				manager->sensors = (SensorBase*)create_camer(index);
 		    if(manager->sensors!=NULL)
 				{
-					manager->sensors->setParam = setAck;
+					manager->sensors->setParam = setCamerAck;
 				}	
 				else
 					return false; 		
@@ -144,6 +144,25 @@ void setAck(void* self, uint8_t *data)
 	 }
 	 UartDeviceContext_t *pDev = &uartDevices[base->devId];
 	 xQueueSendFromISR(pDev->devControlQueue, &base, &pxHigherPriorityTaskWoken);	
+}
+/* 摄像头专用数据回调:变长帧直通 DEV_CAMER.data,跳过 64B 通用中继 */
+void setCamerAck(void* self, uint8_t *data)
+{
+   BaseType_t pxHigherPriorityTaskWoken;
+
+	 SensorBase *base = (SensorBase*)self;
+	 DEV_CAMER *camer = (DEV_CAMER*)self;
+
+	 size_t len = base->data_len;
+	 if (len > 256) len = 256;                 /* 与 DEV_CAMER.data 匹配,防溢出 */
+	 memset(camer->data, 0, sizeof(camer->data));
+	 if (len > 0)
+		 memcpy(camer->data, data, len);
+	 camer->n_targets = (uint8_t)(len / 10);   /* 每组 10 字节,余数丢弃 */
+	 if (camer->n_targets > 25) camer->n_targets = 25;
+
+	 UartDeviceContext_t *pDev = &uartDevices[base->devId];
+	 xQueueSendFromISR(pDev->devControlQueue, &base, &pxHigherPriorityTaskWoken);
 }
 void set_sensor_parameter(SensorBase* sensor,uint8_t *param) {
 	  

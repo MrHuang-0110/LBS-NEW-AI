@@ -23,7 +23,8 @@ typedef struct
 {
 	SensorBase base;
 	CAMER_MODE mode;
-	uint8_t data[40];
+	uint8_t n_targets;   /* 本帧目标数量 N (0~25),由帧长度/10 得出 */
+	uint8_t data[256];   /* 标签识别动态帧:N*10 字节,N<=25 */
 }DEV_CAMER;
 
 DEV_CAMER *create_camer(uint8_t index);

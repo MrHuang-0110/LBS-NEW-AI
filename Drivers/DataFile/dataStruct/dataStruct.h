@@ -13,6 +13,7 @@ typedef struct{
 #endif
  typedef struct {
    int  type,findIndex,devId;	 
+	 uint16_t data_len;           /* 本帧数据长度(字节),摄像头等变长设备使用 */
 	 uint8_t data[64];
    char name[16];
    void (*setParam)(void* self, uint8_t *data);
@@ -31,4 +32,5 @@ typedef struct
 bool identify_and_bind(__PORT *manager,uint8_t devId,uint8_t index);
 void set_sensor_parameter(SensorBase* sensor,uint8_t *param);
 void setAck(void* self, uint8_t *data);
+void setCamerAck(void* self, uint8_t *data);
 #endif

@@ -32,27 +32,9 @@ DEV_CAMER *read_camer(void *self)
 }
 
 void refsh_camer(DEV_CAMER* mt, uint8_t index,uint8_t* data)
-{ 
-  
+{
+    (void)data;                              /* 数据已由 setCamerAck 直通写入 */
     mt->mode = (CAMER_MODE)index;
-    switch(index)
-    {
-			case CAMER_MENU_TYPE:
-			case CAMER_MODE_TYPE:
-			case CAMER_FACE_TYPE:
-	    case CAMER_LABE_TYPE:
-	    case CAMER_OBJECT_TYPE:
-	    case CAMER_COLOR_TYPE:
-	    case CAMER_WAY_TYPE:
-	    case CAMER_GESTURE_TYPE:
-	    case CAMER_BODY_TYPE:
-	    case CAMER_OBJECT_BODY_TYPE:
-	    case CAMER_PHOTO_TYPE:	
-				memset(mt->data,0,sizeof(mt->data));
-			  memcpy(mt->data,data,sizeof(mt->data)); 
-			break;
-    }
- 
 }
 
 bool is_camer_base(uint8_t id)
