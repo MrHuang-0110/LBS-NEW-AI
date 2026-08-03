@@ -440,7 +440,11 @@ void scan_agreement_data_port_dev(uint8_t index,uint8_t *pData,uint16_t length)
 	 }
 	 else
 	 {
-      port_data_parsing(index,rxAGREEMENT.sID,rxAGREEMENT.index,rxAGREEMENT.data);		  
+      if(portDev[index].sensors != NULL)
+      {
+          portDev[index].sensors->data_len = rxAGREEMENT.length;
+      }
+      port_data_parsing(index,rxAGREEMENT.sID,rxAGREEMENT.index,rxAGREEMENT.data);
 	 }
 }
  
