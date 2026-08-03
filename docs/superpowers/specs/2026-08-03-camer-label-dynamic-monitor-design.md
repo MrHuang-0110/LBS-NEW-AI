@@ -80,7 +80,7 @@ id 语义由板端当前激活功能决定:
 
 | 文件 | 改动 |
 |---|---|
-| `Drivers/DataFile/dataStruct/dataStruct.h` | `SensorBase` 加 `uint16_t data_len` (2B, 8 设备 × 8 端口共 +128B,可忽略) |
+| `Drivers/DataFile/dataStruct/dataStruct.h` | `SensorBase` 加 `uint16_t data_len` (2B, 8 设备 × 8 端口共 +128B,可忽略)。注意:`data_len` 是所有设备共用的共享字段,`scan_agreement_data_port_dev` 对任何设备帧都会写,但只有摄像头的 `setCamerAck` 消费它。写入 (ISR) 与拷贝/入队在同一 ISR 内顺序完成,任务侧读到的是最新帧,与现有 `setAck` 模式一致 |
 | `Drivers/DataFile/dataStruct/dataStruct.c` | 新增 `setCamerAck()`:按 `data_len` (上限 256) 拷入 `camer->data`,计算 `n_targets = data_len / 10`,入队;`identify_and_bind` 中 `DEV_ID_CAMER` 改用 `setCamerAck` |
 | `Drivers/DataFile/portAgree/portagree.c` | `scan_agreement_data_port_dev` 在 `dataAgreeAnalys` 成功后、`port_data_parsing` 前:`portDev[index].sensors->data_len = rxAGREEMENT.length` |
 | `Drivers/DataFile/camer/camer.h` | `DEV_CAMER.data[40]` → `data[256]` (25 组 × 10 = 250,留 6B 余量);新增 `uint8_t n_targets` |
@@ -90,26 +90,45 @@ ISR 写 `camer->data` / 任务读,单一写者 + 队列同步,与现有模式一
 
 ### 2. JSON 监控
 
-`newAiMonitor()` 的 `DEV_ID_CAMER` case,仅 `CAMER_LABE_TYPE`:
+`newAiMonitor()` 的 `DEV_ID_CAMER` case,仅 `CAMER_LABE_TYPE`,现有代码 (简化后):
 
 ```c
-// 现: for(int det = 0; det < 4; det++)  →  改为:
+const char *id_names[4] = {"id1", "id2", "id3", "id4"};
+for(int det = 0; det < 4; det++) {
+    int base = det * 10;
+    p = json_objOpen(p, NULL, &remLen);
+    p = json_int(p, id_names[det], dev_camer->data[base], &remLen);
+    p = json_int(p, "x", dev_camer->data[base+1]<<8|dev_camer->data[base+2], &remLen);
+    p = json_int(p, "y", dev_camer->data[base+3]<<8|dev_camer->data[base+4], &remLen);
+    p = json_int(p, "w", dev_camer->data[base+5]<<8|dev_camer->data[base+6], &remLen);
+    p = json_int(p, "h", dev_camer->data[base+7]<<8|dev_camer->data[base+8], &remLen);
+    p = json_int(p, "pp", dev_camer->data[base+9], &remLen);
+    p = json_objClose(p, &remLen);
+}
+```
+
+改为:
+
+```c
+// 仅 CAMER_LABE_TYPE:动态 N 组
 int n = dev_camer->n_targets;
 for(int det = 0; det < n; det++) {
+    int base = det * 10;
     p = json_objOpen(p, NULL, &remLen);
-    p = json_int(p, "id",  dev_camer->data[base], &remLen);
-    p = json_int(p, "x",   data[base+1]<<8|data[base+2], &remLen);
-    p = json_int(p, "y",   data[base+3]<<8|data[base+4], &remLen);
-    p = json_int(p, "w",   data[base+5]<<8|data[base+6], &remLen);
-    p = json_int(p, "h",   data[base+7]<<8|data[base+8], &remLen);
-    p = json_int(p, "conf", data[base+9], &remLen);
+    p = json_int(p, "id",   dev_camer->data[base], &remLen);
+    p = json_int(p, "x",    dev_camer->data[base+1]<<8|dev_camer->data[base+2], &remLen);
+    p = json_int(p, "y",    dev_camer->data[base+3]<<8|dev_camer->data[base+4], &remLen);
+    p = json_int(p, "w",    dev_camer->data[base+5]<<8|dev_camer->data[base+6], &remLen);
+    p = json_int(p, "h",    dev_camer->data[base+7]<<8|dev_camer->data[base+8], &remLen);
+    p = json_int(p, "conf", dev_camer->data[base+9], &remLen);
     p = json_objClose(p, &remLen);
 }
 ```
 
 - N=0 → 循环不执行,输出 `"configs": []`
-- `id1/id2...` → `id`,`pp` → `conf`(仅 labe 模式)
+- 键名:`id1/id2...` → `id`,`pp` → `conf`(仅 labe 模式)
 - 非 labe 模式:原固定 4 组不动
+- `id_names[4]` 数组随动态循环移除 (不再需要)
 
 ### 3. PikaScript 接口
 
@@ -176,4 +195,7 @@ def send_hw_mode(port:float,mode:float):...
 
 ## Review
 
-- [ ] 待实现后复核
+- [x] 占位符扫描:无 TBD/TODO,验证与文件清单完整
+- [x] 内部一致性:格式示例、数据流、字节偏移、实现均一致;接收 (setCamerAck) → 存储 (n_targets) → 输出 (JSON/PikaScript) 三段均按 N 联动
+- [x] 范围:单一功能 (摄像头标签识别动态 N),一份实现计划可完成
+- [x] 歧义:cam_data 第一参数为数据序号 (非目标 ID) 已在语义节锁死;仅 labe 模式改动的边界已明确
