@@ -63,3 +63,6 @@ Thumbs.db
 desktop.ini
 .vscode/
 .idea/
+
+# Git worktrees (isolated development workspaces)
+**/.worktrees/
