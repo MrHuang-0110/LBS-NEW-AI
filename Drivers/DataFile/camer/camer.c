@@ -5,7 +5,7 @@
 //#include "malloc.h"
 #include "motor.h"
 
-static DEV_CAMER __attribute__((section(".DMA_SRAM2_16KB"), aligned(4))) dev_camer[8];
+static DEV_CAMER dev_camer[8];
  
 
 DEV_CAMER *create_camer(uint8_t index)
