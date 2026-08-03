@@ -19,5 +19,6 @@ PikaObj *New__camer(Args *args);
 
 pika_float _camer_cam_data(PikaObj *self, pika_float port, pika_float id, pika_float obj_id);
 void _camer_changer_camer_mode(PikaObj *self, pika_float port, pika_float mode);
+void _camer_send_hw_mode(PikaObj *self, pika_float port, pika_float mode);
 
 #endif

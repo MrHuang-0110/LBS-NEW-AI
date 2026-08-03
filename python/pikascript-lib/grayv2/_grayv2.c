@@ -137,7 +137,7 @@ void _grayv2_power_find_way_type(PikaObj *self, int port, pika_float power, int 
 											slave,
 											power);
 		 
-				motor_delay_exit(10);	  
+				motor_delay_exit(5);	  
 	 }
  	 
 	 if(enctord == 0)
@@ -191,7 +191,7 @@ void _grayv2_power_find_way_type(PikaObj *self, int port, pika_float power, int 
 		 slave->control.current_mode = MOTOR_SPEED;
 			
 		 motor_arrived = master_exceed && slave_exceed;
-		 motor_delay_exit(10);	  
+		 motor_delay_exit(5);	  
 	 }  
  
    master->control.current_mode = MOTOR_STOP_BREAK; 
@@ -218,7 +218,7 @@ void _grayv2_power_find_if_ch_state(PikaObj *self, int port, pika_float power1, 
 	 {
 		 master->control.current_mode = MOTOR_SPEED;
 		 slave->control.current_mode = MOTOR_SPEED;		 
-	   motor_delay_exit(10);	  
+	   motor_delay_exit(5);	  
 	 }
     master->control.current_mode = MOTOR_STOP_BREAK; 
     slave->control.current_mode = MOTOR_STOP_BREAK;  
@@ -299,7 +299,7 @@ void _grayv2_power_find_line_encord(PikaObj *self, int port, pika_float power, i
 											slave,
 											power);
 		 motor_arrived = master_exceed && slave_exceed;
-			 motor_delay_exit(10);	  
+			 motor_delay_exit(5);	  
 	 }  
 	  master->control.current_mode = MOTOR_STOP_BREAK; 
     slave->control.current_mode = MOTOR_STOP_BREAK;  

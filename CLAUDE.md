@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Firmware for an STM32H723 (Cortex-M7 @ 480 MHz) educational robotics controller. Bare C on top of STM32 HAL + FreeRTOS, with a PikaScript (Python-on-MCU) runtime so end-user programs written in Python are downloaded to the device and executed at runtime. Also integrates ST X-CUBE-AI (neural network inference), STM32 MotionFX, FATFS on external QSPI flash, and USB CDC.
+Firmware for an STM32H723 (Cortex-M7 @ 480 MHz) educational robotics controller. Bare C on top of STM32 HAL + FreeRTOS, with a PikaScript (Python-on-MCU) runtime so end-user programs written in Python are downloaded to the device and executed at runtime. Also integrates ST X-CUBE-AI (neural network inference), STM32 MotionFX sensor fusion, FATFS on external QSPI flash, and USB CDC.
 
 There is **no CLI build, no test suite, no linter**. All building is done in Keil µVision (MDK-ARM). `compile_flags.txt` is for clangd/IDE intellisense only — it does not drive a build.
 
@@ -21,6 +21,116 @@ App code runs from flash offset `0x08020800` — `main()` sets `SCB->VTOR = 0x08
 
 Compile defines: `STM32H723xx`, `USE_HAL_DRIVER`, `PIKA_CONFIG_ENABLE`.
 
+## Boot & runtime architecture
+
+Single entry chain; understanding this is prerequisite to touching anything:
+
+1. `main()` ([Core/Src/main.c](Core/Src/main.c)) — enables I/D-cache, HAL init, clocks (480 MHz), `freeRtosHeapMemInit()` (defines the FreeRTOS heap across two regions: 64 KB DTCM + 256 KB AXI, see `ucHeapAXI`/`ucHeapDCM` in [matchineState.c](Drivers/DataFile/machine/matchineState.c)), then `NEWAI_CreatePowerOnStartTask()`.
+2. `NEWAI_CreatePowerOnStartTask()` ([matchineState.c](Drivers/DataFile/machine/matchineState.c)) — creates the `MatChineStateTask`, the global event group `xEventGroup`, the shared mutexes (`xUsbMutex`, `xRunPythonMutex`, `xRefreshMutex`, `xFsMutex`), calls `MultiUart_Init()`, then `vTaskStartScheduler()`.
+3. `MatChineStateTask` — the central state machine. It spawns `USB_Download_Task` and `EnteryTask`, runs `bspInit()` (all peripheral bring-up), sets up the LED matrix UI, then creates a set of **periodic FreeRTOS software timers** (key scan 10 ms, port scan 50 ms, monitor 30 ms, battery 100 ms, bluetooth 200 ms, IWDG feed 50 ms, motion/mem 20 ms, remote timeout 2000 ms) and finally `MX_USB_DEVICE_Init()`. Its main loop waits on `xEventGroupWaitBits` and dispatches events.
+4. `EnteryTask` — waits on `EVENT_RUN_PYTHON`, takes `xRunPythonMutex`, calls `runPython()`. `EVENT_RUN_PYTHON` is set from `ui_entery()` when the user picks a UI slot `< 20` (or `REMOTRE_LOGO`). Calling it again while running triggers `pks_vm_exit()` to stop the active script.
+
+### Event system
+
+All events are bits on a single `EventGroupHandle_t xEventGroup` (defined in [matchineState.h](Drivers/DataFile/machine/matchineState.h)):
+
+| Event | Bit | Triggered by | Handled in |
+|---|---|---|---|
+| `EVENT_REFRESH_MATRIX` | 0 | Timer/key events | `MatChineStateTask` main loop |
+| `EVENT_SEND_MONITOR` | 1 | 30 ms timer | `newAiMonitor()` sends JSON sensor data over USB |
+| `EVENT_FIND_PORT_DEV` | 2 | 50 ms timer | `FindProtDev()` — scans ports for attached devices |
+| `EVENT_USB_FRAM_BYTE` | 3 | USB CDC data received | `USB_Download_Task` |
+| `EVENT_KEY_ENTERY` | 4 | Key press detected | `ui_entery()` — UI navigation |
+| `EVENT_BLUE_FRAM_BYTE` | 6 | Bluetooth data received | `USB_Download_Task` |
+| `EVENT_RUN_PYTHON` | 7 | UI entry selection | `EnteryTask` → `runPython()` |
+| `EVENT_MEM_REFRESH` | 9 | 20 ms timer | IMU sensor fusion update |
+| `EVENT_SENORD_REFRESH` | 10 | — | Sensor data refresh |
+| `EVENT_BLUE_STATE_REFRESH` | 11 | — | Bluetooth state update |
+| `EVENT_BAT_REFRESH` | 12 | 100 ms timer | Battery level display refresh |
+| `EVENT_CAMER_MODE` | 5 | — | Camera mode switching |
+| `EVENT_PLAYER_KEY_VIOC` | 16 | — | Player/multimedia key handler |
+
+Use `SET_EVENT_GROUP()` / `SET_EVENT_GROUP_ISR()` to signal; never invent a second event group.
+
+### Concurrency model
+
+- `usbDownloadActive` is a global gate: when a USB/Bluetooth file download is in progress, the state-machine timers skip sensor/UI refresh, key scanning, and port scanning. Respect this when adding timer callbacks.
+- FreeRTOS heap is the only general allocator inside tasks (`pvPortMalloc`/`vPortFree`). Older `mymalloc(SRAMIN, …)` calls are commented out in favor of `pvPortMalloc` — follow that pattern.
+- Shared mutexes: `xUsbMutex` (USB/Bluetooth download), `xRunPythonMutex` (Python execution), `xRefreshMutex` (matrix display), `xFsMutex` (FATFS file system).
+
+## Multi-UART device framework
+
+Sensors and actuators are addressed through a multi-UART abstraction in [matchineState.c](Drivers/DataFile/machine/matchineState.c) and [portAgree/](Drivers/DataFile/portAgree):
+
+- `MultiUart_Init()` (in [uart.c](Drivers/BSP/uart/)) — initializes all UART peripherals. Each UART gets a device context (`UartDeviceContext_t`) with its own `devControlQueue`, `devTxQueue`, `uartMutex`, and `txCompleteSem`.
+- `vDevControlTask` / `vDevUartSendTask` — one instance per UART, draining `devControlQueue` (incoming sensor data) / `devTxQueue` (outgoing commands).
+- `vDevControlTask` dispatches by `SensorBase->type` to `refsh_motor`, `refsh_gray`, `refsh_color`, `refsh_touch`, `refsh_ultrasion`, `refsh_camer`, `refsh_gray_v2`, `refsh_nfc`.
+
+### Device identification protocol
+
+`FindProtDev()` (triggered by `EVENT_FIND_PORT_DEV` on a 50 ms timer) scans 8 ports. Each port has a `__PORT` struct with a `SensorBase*` pointer. The protocol:
+
+1. Sends a link query frame to the device (`DEV_PORT_LINKE` command).
+2. Device responds with a string — if it contains `"Play Aplication"`, the device is identified and `identify_and_bind()` creates the appropriate typed device struct (e.g., `DEV_MOTOR`, `DEV_GRAY`).
+3. Device IDs: `DEV_ID_BIG_MOTOR` (0xA1), `DEV_ID_SMALL_Motor` (0xA6), `DEV_ID_GRAY` (0xA2), `DEV_ID_TOUCH` (0xA3), `DEV_ID_ULTRASION` (0xA4), `DEV_ID_COLOR` (0xA5), `DEV_ID_CAMER` (0xA7), `DEV_ID_GRAY_V2` (0xB0), `DEV_ID_NFC` (0xA8).
+
+### Wire protocol
+
+The `_AGREEMENT` frame format (in [portagree.h](Drivers/DataFile/portAgree/portagree.h)):
+
+```
+Head(0x5A) | sID | oID | length(2B) | index | data[256] | crc | tard(0xA5)
+```
+
+A `FrameParser` state machine (`STATE_IDLE` → `STATE_HEADER` → `STATE_SRC_ID` → `STATE_DEST_ID` → `STATE_LENGTH` → `STATE_TYPE` → `STATE_DATA` → `STATE_CHECKSUM` → `STATE_FOOTER`) handles byte-by-byte deserialization. `handle_complete_frame()` routes completed frames to the appropriate handler.
+
+## Device modules
+
+### Motor (`_motor.pyi` / `pikascript-lib/motor/_motor.c` / [Drivers/DataFile/motor/](Drivers/DataFile/motor/))
+
+- Supports big motors (0xA1) and small motors (0xA6).
+- `DEV_MOTOR` struct contains `_USER_MOTOR` (stop mode, power), `MOTOR_RUN_INFO` (speed, angle, position, encoders), and `MOTOR_CONTROL` (PID position control).
+- Motor control modes: `MOTOR_IDLE`, `MOTOR_STOP_SILD`, `MOTOR_STOP_BREAK`, `MOTOR_STOP`, `MOTOR_SPEED`, `MOTOR_SPEED_POS`, `MOTOR_PWM`.
+- `_USER_DOUBLE_MOTOR` pairs two motors for differential drive with yaw PID and line-following PID (`pid_find_line`).
+- Python API includes `run()`, `stop()`, `stop_module()`, `run_for_degrees()`, `run_power()`, `set_duty()`, `pair()`, `mov()*` (differential drive), `pid_*` (PID tuning), `absolute_position()`, `relative_angle()`.
+
+### Gray (grayscale/line sensor, `_gray.pyi` / `pikascript-lib/gray/_gray.c`)
+
+- `DEV_ID_GRAY` (0xA2). `DEV_GRAY` struct with 8 sensor values, 8 states, thresholds, and calibration.
+- Python API: `read()`, `isLine()`, `isCross()`, `grayValue()`, `one_calibrate()`, `two_calibrate()`.
+
+### GrayV2 (enhanced line sensor, `_grayv2.pyi` / `pikascript-lib/grayv2/_grayv2.c`)
+
+- `DEV_ID_GRAY_V2` (0xB0). 7-channel sensor with way-type detection (`T_WAY`, `LEFT_WAY`, `RIGHT_WAY`, `MIDDLE_WAY`, etc.).
+- `grayv2_find_line()` — integrated line-following controller using motor pair + PID.
+- Python API: `getWay()`, `getL()`, `getState()`, `getThreshold()`, `setThreshold()`, `pid()`, `init()`, `calibrate()`, `findLine()`.
+
+### Touch (`_touch.pyi` / `pikascript-lib/touch/_touch.c`)
+
+- `DEV_ID_TOUCH` (0xA3). Returns touch sensor state.
+- Python API: `isDown()`, `htouch()`.
+
+### Ultrasion (ultrasonic sensor, `_ultrasion.pyi` / `pikascript-lib/ultrasion/_ultrasion.c`)
+
+- `DEV_ID_ULTRASION` (0xA4). Distance measurement.
+- Python API: `get()`, `getCM()`, `getMM()`.
+
+### Color (`_color.pyi` / `pikascript-lib/color/_color.c`)
+
+- `DEV_ID_COLOR` (0xA5). Color sensor with calibration.
+- Python API: `get()`, `getRGB()`, `getHue()`, `getLight()`, `isColor()`, `one_calibrate()`, `two_calibrate()`.
+
+### Camer (AI camera, `_camer.pyi` / `pikascript-lib/camer/_camer.c`)
+
+- `DEV_ID_CAMER` (0xA7). Vision AI camera with multiple recognition modes.
+- Modes: `CAMER_MENU_TYPE`, `CAMER_MODE_TYPE`, `CAMER_FACE_TYPE`, `CAMER_LABE_TYPE`, `CAMER_OBJECT_TYPE`, `CAMER_COLOR_TYPE`, `CAMER_WAY_TYPE`, `CAMER_GESTURE_TYPE`, `CAMER_BODY_TYPE`, `CAMER_OBJECT_BODY_TYPE`, `CAMER_PHOTO_TYPE`.
+- Python API: `isDetect()`, `get_id()`, `get_x()`, `get_y()`, `get_w()`, `get_h()`, `mode()`, `photo()`, `get_photo()`.
+
+### NFC (`_nfc.pyi` / `pikascript-lib/nfc/_nfc.c`)
+
+- `DEV_ID_NFC` (0xA8). NFC tag reader/writer.
+- Python API: `read()`, `write()`.
+
 ## PikaScript (Python) toolchain — read before editing `python/`
 
 User-facing Python API is defined by `*.pyi` stubs in `python/` (e.g. `_motor.pyi`, `_gray.pyi`, `newai.pyi`). The C side is **auto-generated** — do not hand-edit:
@@ -32,44 +142,140 @@ User-facing Python API is defined by `*.pyi` stubs in `python/` (e.g. `_motor.py
 Tooling in `python/`:
 - `pikaPackage.exe` — the PikaScript compiler/bundler. **After editing any `.pyi` or `.py` you must re-run this** to regenerate `pikascript-api/` bindings and bytecode, then rebuild the firmware. There is no prebuild hook in the Keil project (`<BeforeMake>` is empty), so regeneration is manual.
 - `rust-msc-latest-win10.exe` — underlying rust-based Pika compiler.
-- `requestment.txt` — PikaScript package versions (pikascript-core==v1.13.4, …).
-- `main.py` — the default Python entry source.
+- `requestment.txt` — PikaScript package versions (pikascript-core==v1.13.4, PikaStdLib==v1.13.4, _thread==v0.0.7, time==v0.2.2, math==v0.1.1, random==v0.1.4).
+- `main.py` — the default Python entry source that imports all modules.
 
 At runtime, user programs are **not** compiled on-device. `runPython()` in [Drivers/DataFile/entery/entery.c](Drivers/DataFile/entery/entery.c) loads a pre-compiled `.o` bytecode file from external flash (FATFS path `1:app/<uiListNum>.o`) and executes it via `pikaVM_runByteCodeInconstant`. Files are downloaded to flash over USB/Bluetooth by `USB_Download_Task`.
 
-## Boot & runtime architecture
+### PikaScript platform glue
 
-Single entry chain; understanding this is prerequisite to touching anything:
+`pika_config.c` ([Core/Src/pika_config.c](Core/Src/pika_config.c)) provides the platform adaptation layer — `pika_platform_malloc`/`free`/`realloc` (wrapping `pvPortMalloc`/`vPortFree`), `pika_platform_sleep_ms` (using `vTaskDelay` with GIL release), `pika_platform_fopen`/`fread`/`fwrite`/`fclose`/`fseek`/`ftell` (wrapping FATFS `f_open`/`f_read`/etc.), and `newai_Task_platformGetTick`.
 
-1. `main()` ([Core/Src/main.c](Core/Src/main.c)) — enables I/D-cache, HAL init, clocks (480 MHz), `freeRtosHeapMemInit()` (defines the FreeRTOS heap across two regions: 64 KB DTCM + 256 KB AXI, see `ucHeapAXI`/`ucHeapDCM` in [matchineState.c](Drivers/DataFile/machine/matchineState.c)), then `NEWAI_CreatePowerOnStartTask()`.
-2. `NEWAI_CreatePowerOnStartTask()` ([matchineState.c](Drivers/DataFile/machine/matchineState.c)) — creates the `MatChineStateTask`, the global event group `xEventGroup`, the shared mutexes (`xUsbMutex`, `xRunPythonMutex`, `xRefreshMutex`, `xFsMutex`), calls `MultiUart_Init()`, then `vTaskStartScheduler()`.
-3. `MatChineStateTask` — the central state machine. It spawns `USB_Download_Task` and `EnteryTask`, runs `bspInit()` (all peripheral bring-up), sets up the LED matrix UI, then creates a set of **periodic FreeRTOS software timers** (key scan 10 ms, port scan 50 ms, monitor 30 ms, battery 100 ms, bluetooth 200 ms, IWDG feed 50 ms, motion/mem 20 ms) and finally `MX_USB_DEVICE_Init()`. Its main loop blocks on `xEventGroupWaitBits` and dispatches `EVENT_*` bits to refresh the matrix UI, send monitor data, scan ports, run UI entry, etc.
-4. `EnteryTask` — waits on `EVENT_RUN_PYTHON`, takes `xRunPythonMutex`, calls `runPython()`. `EVENT_RUN_PYTHON` is set from `ui_entery()` when the user picks a UI slot `< 20` (or `REMOTRE_LOGO`). Calling it again while running triggers `pks_vm_exit()` to stop the active script.
+## Monitor protocol
 
-### Concurrency model
-- One global `EventGroupHandle_t xEventGroup` carries all `EVENT_*` flags (defined in [matchineState.h](Drivers/DataFile/machine/matchineState.h)). Use `SET_EVENT_GROUP()` / `SET_EVENT_GROUP_ISR()` to signal; never invent a second event group.
-- `usbDownloadActive` is a global gate: when a USB/Bluetooth file download is in progress, the state-machine timers skip sensor/UI refresh and port scanning. Respect this when adding timer callbacks.
-- FreeRTOS heap is the only general allocator inside tasks (`pvPortMalloc`/`vPortFree`). Older `mymalloc(SRAMIN, …)` calls are commented out in favor of `pvPortMalloc` — follow that pattern.
+`newAiMonitor()` (in [portagree.c](Drivers/DataFile/portAgree/portagree.c)) sends a JSON-formatted monitor string over USB CDC at 30 ms intervals (triggered by `EVENT_SEND_MONITOR`). The JSON contains all sensor readings, port states, battery level, and motor data. The monitor is suppressed during USB/Bluetooth idle time or when `is_monitor` is false.
 
-## Device / port abstraction
+## IMU / MotionFX
 
-Sensors (motor, gray, touch, ultrasion, color, camer, grayv2, nfc) are addressed through a multi-UART device framework in [matchineState.c](Drivers/DataFile/machine/matchineState.c):
+[Drivers/DataFile/mem/](Drivers/DataFile/mem/) contains LSM6DS3TR-C (accelerometer + gyroscope) and LIS2MDL (magnetometer) drivers with ST MotionFX sensor fusion:
 
-- `vDevControlTask` / `vDevUartSendTask` run per UART device, draining `devControlQueue` / `devTxQueue`.
-- Each device is a `SensorBase*` with a `type` field (`DEV_ID_BIG_MOTOR`, `DEV_ID_GRAY`, `DEV_ID_TOUCH`, …) dispatched in `vDevControlTask` to `refsh_motor` / `refsh_gray` / …
-- The wire protocol lives in [Drivers/DataFile/portAgree](Drivers/DataFile/portAgree) (`_AGREEMENT` frame: Head / sID / oID / length / index / data[256] / crc / tard). `FindProtDev()` (triggered by `EVENT_FIND_PORT_DEV`) scans ports to detect attached devices.
-- Python modules (`_motor`, `_gray`, …) are thin bindings over these C device modules — the real logic is in `Drivers/DataFile/<device>/` and `python/pikascript-lib/<module>/_<module>.c`.
+- `lsm6ds3tr_c_motion_fx_determin()` — called on `EVENT_MEM_REFRESH` (20 ms timer). Reads IMU data and runs MotionFX algorithm to compute pitch, roll, yaw.
+- `DEV_MEM` struct holds raw and processed data: `angular_rate_mdps`, `acceleration_mg`, `magnetic_mG`, `pitch`/`roll`/`yaw`, `dt`, and `MFX_output_t`.
+- `get_yaw()`, `get_continuous_yaw()`, `resetyaw()`, `get_raw_grayz()` — query functions.
+- `stm32_motionfx_library` precompiled library at `STM32_MotionFX_Library/`.
 
-## Directory map (non-obvious parts)
+## PID control
+
+`Middle/PID_CONTROL/pid_control.h` provides:
+- `PIController` — PI controller with `Kp`, `Ki`, `integral`, `out_limit`, `integral_limit`.
+- `PositionController` — PID position controller with `Kp`, `Ki`, `Kd`, `target_pos`.
+- Functions: `PI_Init`, `PI_Compute`, `PI_Reset`, `Pos_Init`, `Pos_Compute`, `Pos_SetTarget`.
+
+Used by motor control (`MOTOR_CONTROL` uses `PositionController` + `PIController` for V/50 speed), line following (`grayv2_find_line` + `pid_find_line`), and yaw control (`yaw_pid`).
+
+## Filter system
+
+[Drivers/DataFile/filter/](Drivers/DataFile/filter/) provides:
+- `AdaptiveFilter` — adaptive filter with configurable min/max alpha and speed threshold.
+- `DualMotorSyncController` — dual-motor synchronization controller with speed difference tracking, filtering, and sync adjustment calculation.
+
+## USB CDC / Bluetooth download
+
+[Drivers/DataFile/download/](Drivers/DataFile/download/) handles file download over USB (`USB_PORT 0x09`) and Bluetooth (`BLUE_PORT 0x0A`):
+
+- `USB_Download_Task` — waits on `EVENT_USB_FRAM_BYTE` / `EVENT_BLUE_FRAM_BYTE`, calls `downloadFile()`.
+- `downloadFile()` — state machine: `STATE_CREATE_FILE` → `STATE_RECEIVE_DATA` → `STATE_RECEIVE_END` → `STATE_SAVE_FILE`. Saves to FATFS on external QSPI flash.
+- Ring buffers (`getUSB_RingBuffer_Handle`, `getBLUE_RingBuffer_Handle`) buffer incoming data.
+- `USB_IdleTimeoutCallback` / `BLUE_IdleTimeoutCallback` — 3 ms one-shot timers that fire after data stops arriving, triggering `process_received_data()`.
+
+## LED matrix display
+
+[Drivers/User/matrix/](Drivers/User/matrix/) drives a 9×7 LED matrix:
+
+- `_API_MATRIX_CFG` — holds lamp array (9 bytes), XY pixel array (9×7), color, brightness, roll delay.
+- `DRIVER_MATRIX` — lower-level driver struct.
+- Functions: `_show_write_led`, `_show_roll_ui`, `_show_roll_pika`, `_ui_row_refresh`, `_clear_matrix`, `set_pixe`, `matrix_set_xy_color`.
+- UI constants: `UI_DEFAULT_COLOR` (0x080FF00), `UI_DEFAULT_BRIGTNESS` (12).
+- `refresmatrtixlamp()` — updates the lamp display for a given port state.
+- Python binding: `_matrix.pyi` → `pikascript-lib/matrix/_matrix.c`.
+
+## LED matrix UI / rawMatrix
+
+[Drivers/DataFile/rawMatrix/](Drivers/DataFile/rawMatrix/) manages the UI screen system:
+
+- UI screens: `REMOTRE_LOGO` (54), `BLUE_LOGO` (53), `BAT_LOGO` (55).
+- `redrawUIInit()` — initializes UI from file, shows startup logo.
+- `redrawMatrixUI()` — redraws the current UI screen.
+- `sendUIlistNumber()` — sends the current UI list number over USB.
+- `get_ui_num()`, `get_ui_file()`, `getCurrentUiList()`, `getDefaultKey()` — UI navigation queries.
+
+## Key scanning
+
+[Drivers/User/key/](Drivers/User/key/) handles key input scanned at 10 ms (`KeyScanTimerCallback`). `updata_key_value()` reads key state, `ui_entery()` (in [entery/](Drivers/DataFile/entery/)) dispatches key events to the UI system.
+
+## Bluetooth
+
+[Drivers/DataFile/blue/](Drivers/DataFile/blue/) manages the Bluetooth module:
+
+- `BLUE_CONFIG` — state (`blueState`, `atState`), AT command data, MAC address, monitor buffer.
+- `blue_init()` — initializes BT module.
+- `blue_onAndoff()` — power control.
+- `is_valid_at_command()`, `is_get_at_data()` — AT command parsing.
+- Blue LED indicator on GPIOD pin 6, BT state on GPIOD pin 10.
+- `BLUE_printf()` — sends monitor data over Bluetooth when connected.
+
+## Remote control
+
+[Drivers/DataFile/remote/](Drivers/DataFile/remote/) handles remote control input:
+
+- `getremotevalue()`, `refreshRemoteValue()`, `clearRemoteValue()`.
+- `set_remote_linke()` / `close_remote_linke()` / `get_remote_linke()` — remote connection state.
+- `REMOTE_TimeoutCallback` — 2 second timer that clears remote values on timeout.
+
+## Battery monitoring
+
+In `matchineState.c` (`BatSendTimerCallback` at 100 ms):
+
+- Reads ADC channels for battery voltage and voice coil voltage.
+- `ADC_TO_VOLTAGE = 3.3f / 65535.0f`, `VOLTAGE_SCALE = 151.0f / 51.0f` (≈2.96 divider).
+- Battery range: 7.0V min, 8.2V max (1.2V range). 4-level indicator.
+- `getBatLevel()` → `_show_write_led()` updates the battery icon on the matrix.
+
+## QSPI flash / FATFS
+
+[Drivers/User/w25qxx/](Drivers/User/w25qxx/) drives the external W25Qxx QSPI flash. The `devfile.c` ([Middle/File_IO/](Middle/File_IO/)) layer provides FATFS integration:
+
+- `getFatfsHandle()` — returns the `_IO_FILE` handle for FATFS operations.
+- File paths: `1:app/<filename>` for user programs, `1:` for the flash root.
+- Used by the download system to save user programs, by the UI system to load screen layouts, and by pika_config for `pika_platform_fopen`/`fread`/`fwrite`.
+
+## AI / X-CUBE-AI
+
+`Middle/AI/` contains the ST X-CUBE-AI runtime headers and `Lib/NetworkRuntime1020_CM7_Keil.lib` (precompiled). `X-CUBE-AI/App/` has the generated neural network model (`network.c/h`, `network_data*.*`) — regenerated by CubeMX/X-CUBE-AI, not hand-edited. The AI inference is used by the color AI module (`colorAi_init()` is called but commented out in the current state machine).
+
+## Utility libraries
+
+- [Drivers/DataFile/cjson/](Drivers/DataFile/cjson/) — JSON parsing (used in monitor).
+- [Drivers/DataFile/list/](Drivers/DataFile/list/) — `DoublyLinkedList` (doubly linked list with `create_node`, `insert_head`, `delete_at`, `find`, `destroy_list`).
+- [Drivers/DataFile/strlist/](Drivers/DataFile/strlist/) — string list utilities.
+- [Drivers/DataFile/ringbufer/](Drivers/DataFile/ringbufer/) — ring buffer for USB/Bluetooth data.
+- [Drivers/DataFile/valueType/](Drivers/DataFile/valueType/) — data type definitions (`DATA_TYPE_INT8`, `DATA_TYPE_FLOAT`, `DATA_TYPE_PID_PARAMS`, etc.).
+- [Drivers/DataFile/message/](Drivers/DataFile/message/) — message passing utilities.
+- [Drivers/DataFile/devPrograment/](Drivers/DataFile/devPrograment/) — device programming/timer-command infrastructure (`create_timer_with_cmd`, `TimerCommandPair`).
+- [Middle/CTL_CMD/](Middle/CTL_CMD/) — command control system.
+- [Middle/MALLOC/](Middle/MALLOC/) — legacy malloc implementation (mostly replaced by `pvPortMalloc`).
+- [Middle/SYSTEM/](Middle/SYSTEM/) — `sys.c`/`sys.h` with basic system utilities.
+
+## Directory map
 
 - `Core/` — STM32 HAL boilerplate, `main.c`, `pika_config.*` (PikaScript platform glue).
-- `Drivers/BSP/` — low-level peripheral BSP (adc, dac, gpio, iic, iwdg, ospi, spi, tim, uart).
-- `Drivers/User/` — higher-level drivers: `w25qxx` (external QSPI flash holding FATFS), `matrix` (LED matrix display), `key`, `music`, `os`.
-- `Drivers/DataFile/` — the application framework. Key subdirs: `machine` (state machine + tasks + heap), `entery` (Python runner + UI entry), `portAgree` (port protocol), `download` (file ingest to flash), `blue` (Bluetooth), `motor`/`gray`/`touch`/`ultrasion`/`color`/`camer`/`grayv2`/`nfc` (device modules), `mem` (motion/IMU mem), `remote`, `message`, `filter`, `cjson`, `ringbufer`, `dataStruct`, `valueType`, `rawMatrix`, `list`, `strlist`.
-- `Middle/` — `SYSTEM`, `DELAY`, `MALLOC`, `File_IO`, `AI` (X-CUBE-AI runtime headers + `Lib/NetworkRuntime1020_CM7_Keil.lib`), `PID_CONTROL`, `CTL_CMD`, `DRIVER_CONTROL/motor_control`.
-- `X-CUBE-AI/App` — ST-generated neural network (`network.c/h`, `network_data*.*`). Regenerated by CubeMX/X-CUBE-AI, not by hand.
-- `STM32_MotionFX_Library` — precompiled ST library; consumed by `lsm6ds3tr_c_motion_fx_determin()` (called on `EVENT_MEM_REFRESH`).
-- `USB/` — STM32 USB CDC device stack. `python/` and `FreeRTOS/`, `FATFS/` are upstream vendored — avoid editing in place where possible.
+- `Drivers/BSP/` — low-level peripheral BSP (adc, dac, gpio, iic, iwdg, ospi, spi, tim, uart with `MultiUart_Init`).
+- `Drivers/User/` — higher-level drivers: `w25qxx` (QSPI flash), `matrix` (LED matrix), `key`, `music`, `os`.
+- `Drivers/DataFile/` — the application framework. Subdirs: `machine` (state machine + tasks + heap), `entery` (Python runner + UI entry), `portAgree` (port/wire protocol), `download` (file ingest), `blue` (Bluetooth), `motor`/`gray`/`touch`/`ultrasion`/`color`/`camer`/`grayv2`/`nfc` (device modules), `mem` (IMU/MotionFX), `remote` (remote control), `rawMatrix` (UI manager), `filter` (adaptive filter + motor sync), `message`, `cjson`, `ringbufer`, `dataStruct`, `valueType`, `list`, `strlist`, `devPrograment`.
+- `Middle/` — `SYSTEM`, `DELAY`, `MALLOC`, `File_IO` (FATFS wrapper), `AI` (X-CUBE-AI), `PID_CONTROL`, `CTL_CMD`, `DRIVER_CONTROL/motor_control`.
+- `X-CUBE-AI/App` — ST-generated neural network. Regenerated by CubeMX, not by hand.
+- `STM32_MotionFX_Library` — precompiled ST motion library.
+- `USB/` — STM32 USB CDC device stack. `python/`, `FreeRTOS/`, `FATFS/` are upstream vendored — avoid editing in place where possible.
 - `MDK-ARM/` — Keil project, scatter file, startup `startup_stm32h723xx.s`.
 
 ## Working in this repo
@@ -77,3 +283,6 @@ Sensors (motor, gray, touch, ultrasion, color, camer, grayv2, nfc) are addressed
 - When changing native behavior exposed to Python: edit `python/pikascript-lib/<mod>/_<mod>.c` (and/or the `Drivers/DataFile/<device>` C it calls), re-run `python/pikaPackage.exe`, then rebuild in Keil. Editing a `.pyi` without re-running pikaPackage leaves the C bindings stale.
 - When adding a new periodic action: create a FreeRTOS software timer in `MatChineStateTask` (mirroring the existing `xTimerCreate` + `xTimerStart` pattern) and signal work to the main loop via a new `EVENT_*` bit rather than doing the work in the timer callback.
 - Source files use GBK-encoded Chinese comments in places. Preserve encoding when editing existing C files to avoid mojibake in Keil.
+- **Device ID range**: `0xA1`–`0xB0` for sensors; `0x09` for USB port, `0x0A` for Bluetooth port. When adding a new device type, assign a new `DEV_ID_*`, add it to `identify_and_bind()`, `vDevControlTask`, and create a Python module binding.
+- **Memory**: The FreeRTOS heap spans two regions — `ucHeapDCM` (64 KB DTCM, accessed via `__attribute__((section(".DTCM_Data")))`) and `ucHeapAXI` (256 KB AXI SRAM). `pvPortMalloc` auto-selects the region. Never use `malloc`/`free` from the standard library.
+- **PikaScript GIL**: `pika_platform_sleep_ms` releases the GIL (`pika_GIL_EXIT()`) during `vTaskDelay` so other Python threads can run. Blocking operations in native C bindings should follow the same pattern.

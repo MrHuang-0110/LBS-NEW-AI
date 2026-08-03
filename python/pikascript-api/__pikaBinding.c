@@ -1743,10 +1743,21 @@ method_typedef(
     "changer_camer_mode", "port,mode"
 );
 
+void _camer_send_hw_modeMethod(PikaObj *self, Args *_args_){
+    pika_float port = args_getFloat(_args_, "port");
+    pika_float mode = args_getFloat(_args_, "mode");
+    _camer_send_hw_mode(self, port, mode);
+}
+method_typedef(
+    _camer_send_hw_mode,
+    "send_hw_mode", "port,mode"
+);
+
 class_def(_camer){
     __BEFORE_MOETHOD_DEF
     method_def(_camer_cam_data, 153847919),
     method_def(_camer_changer_camer_mode, 243993096),
+    method_def(_camer_send_hw_mode, 1062276529),
 };
 class_inhert(_camer, TinyObj);
 
