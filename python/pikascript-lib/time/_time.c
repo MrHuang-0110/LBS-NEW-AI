@@ -13,21 +13,22 @@ extern volatile VMState g_PikaVMState;
 volatile int g_pika_local_timezone = 8;
 
 static void _do_sleep_ms_tick(uint32_t ms) {
-    pika_sleep_ms(ms);
+    /* use the firmware override (pika_config.c): vTaskDelay + GIL release +
+       VM exit check, so the middle key can stop time.sleep() promptly */
+    pika_platform_sleep_ms(ms);
 }
 
 void _time_sleep_ms(PikaObj* self, int ms) {
-    pika_GIL_EXIT();
+    /* GIL release/acquire is handled inside pika_platform_sleep_ms
+       (global_do_sleep_ms always resolves to it). Do NOT wrap GIL here —
+       double-wrapping the recursive mutex leaks one lock per call. */
     global_do_sleep_ms(ms);
-    pika_GIL_ENTER();
 }
 
 void _time_sleep_s(PikaObj* self, int s) {
-    pika_GIL_EXIT();
     for (int i = 0; i < s; i++) {
         global_do_sleep_ms(1000);
     }
-    pika_GIL_ENTER();
 }
 
 void _time_platformGetTick(PikaObj* self) {
