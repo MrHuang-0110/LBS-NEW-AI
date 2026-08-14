@@ -25,11 +25,20 @@ typedef struct
 	CAMER_MODE mode;
 	uint8_t n_targets;   /* 本帧目标数量 N (0~25),由帧长度/10 得出 */
 	uint8_t data[256];   /* 标签识别动态帧:N*10 字节,N<=25 */
+	/* Name frame (0x0E) cache: payload = src_type(1B) + sum(id,name_len,name_utf8),<=250B */
+	uint8_t name_src_type; /* owning mode type code (0x04/0x05/0x10/0x12) */
+	uint8_t name_len;      /* name-frame payload total length (incl. src_type) */
+	uint8_t name_data[250];/* raw name-frame payload */
 }DEV_CAMER;
 
 DEV_CAMER *create_camer(uint8_t index);
 DEV_CAMER *read_camer(void *self);
 void refsh_camer(DEV_CAMER* mt, uint8_t index,uint8_t* data);
+void setCamerName(void* self, uint8_t *data);   /* name frame 0x0E direct cache, no mode update */
+
+/* Lookup name in name-frame cache by id; returns pointer into name_data
+   (NOT NUL-terminated), *out_len = name byte length; NULL if not found. */
+const char *camer_find_name(const DEV_CAMER *camer, uint8_t id, uint8_t *out_len);
 
 bool is_camer_base(uint8_t id);
 void set_hw_camer_mode(void);

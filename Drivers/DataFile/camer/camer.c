@@ -37,6 +37,53 @@ void refsh_camer(DEV_CAMER* mt, uint8_t index,uint8_t* data)
     mt->mode = (CAMER_MODE)index;
 }
 
+/* Name frame (0x0E) direct cache: payload = src_type(1B) + sum(id,name_len,name_utf8).
+   No queue, no mode update (0x0E is a name frame, not a mode; avoids refsh_camer
+   writing mode=0x0E). */
+void setCamerName(void* self, uint8_t *data)
+{
+    SensorBase *base = (SensorBase*)self;
+    DEV_CAMER *camer = (DEV_CAMER*)self;
+
+    size_t len = base->data_len;
+    if (len == 0)
+    {
+        camer->name_len = 0;
+        camer->name_src_type = 0;
+        return;
+    }
+    if (len > sizeof(camer->name_data))
+        len = sizeof(camer->name_data);
+
+    memset(camer->name_data, 0, sizeof(camer->name_data));
+    memcpy(camer->name_data, data, len);
+    camer->name_len = (uint8_t)len;
+    camer->name_src_type = data[0];          /* src_type = owning mode type code */
+}
+
+/* Lookup name in name-frame cache by id (learned slot id / tag code / QR seq).
+   Returns pointer into name_data (NOT NUL-terminated, frame stores raw items),
+   *out_len gets the name byte length; NULL if not found. */
+const char *camer_find_name(const DEV_CAMER *camer, uint8_t id, uint8_t *out_len)
+{
+    uint8_t n = camer->name_len;
+    if (n < 1) return NULL;
+    uint16_t pos = 1;                       /* skip src_type */
+    while ((uint16_t)pos + 2 <= n)
+    {
+        uint8_t nid  = camer->name_data[pos];
+        uint8_t nlen = camer->name_data[pos + 1];
+        if ((uint16_t)pos + 2 + nlen > n) break;   /* bounds guard */
+        if (nid == id)
+        {
+            if (out_len) *out_len = nlen;
+            return (const char *)&camer->name_data[pos + 2];
+        }
+        pos += 2 + (uint16_t)nlen;
+    }
+    return NULL;
+}
+
 bool is_camer_base(uint8_t id)
 { 
 	return (read_camer((SensorBase *)getDevBase(id))!=NULL?false:true);

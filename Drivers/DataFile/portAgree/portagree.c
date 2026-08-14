@@ -93,6 +93,15 @@ static void port_data_parsing(int portIndex,int id,int index,uint8_t *data)
 			  }
      break;
 
+		 /*name frame (generic 0x0E): camera uploads recognized name/content, direct cache, no mode change*/
+		 case 0x0E:
+			 if(portDev[portIndex].sensors != NULL &&
+			    portDev[portIndex].sensors->type == DEV_ID_CAMER)
+			 {
+				   setCamerName(portDev[portIndex].sensors,data);
+			 }
+		 break;
+
 		 /*sensord updata*/
 		 /*version ack*/
 		 case 0x08:
@@ -439,23 +448,50 @@ void scan_agreement_data_port_dev(uint8_t index,uint8_t *pData,uint16_t length)
 		  return;
 	 }
 	 
-	 if(dataAgreeAnalys(&rxAGREEMENT,pData,length)!=AGREE_MEN_OK)
-	 {
-				if(portDev[index]._LinkeObjDev == DEV_ID_ULTRASION)
-				{		
-				 if(portDev[index].sensors != NULL)
-				 {
-					  set_sensor_parameter(portDev[index].sensors,pData);					 
-				 }
-				}		
+	 /* ultrasonic: raw data pass-through (not _AGREEMENT framed), keep original behavior */
+	 if(portDev[index]._LinkeObjDev == DEV_ID_ULTRASION)
+	 {		
+		 if(portDev[index].sensors != NULL)
+		 {
+			  set_sensor_parameter(portDev[index].sensors,pData);					 
+		 }
+		 return;
 	 }
-	 else
+	 
+	 /* _AGREEMENT frames: one DMA IDLE interrupt may contain MULTIPLE back-to-back
+	    frames (e.g. camera 0x04 data frame + 0x0E name frame sent with no gap),
+	    so parse in a loop. Otherwise the merged batch fails dataAgreeAnalys length
+	    check (data[3]+7 != length) and the WHOLE batch is dropped -> portTimeOutTick
+	    never refreshed -> port wrongly freed and re-linked every ~0.5s. */
+	 uint16_t pos = 0;
+	 while(pos + 7 <= length)
 	 {
-      if(portDev[index].sensors != NULL)
-      {
-          portDev[index].sensors->data_len = rxAGREEMENT.length;
-      }
-      port_data_parsing(index,rxAGREEMENT.sID,rxAGREEMENT.index,rxAGREEMENT.data);
+		 if(pData[pos] != 0x5A)
+		 {
+			 pos++;                 /* lost sync: resync byte-by-byte */
+			 continue;
+		 }
+		 
+		 uint16_t frame_len = (uint16_t)pData[pos + 3] + 7;   /* len field + 5A/sID/oID/len/type/crc/A5 */
+		 if(pos + frame_len > length)
+		 {
+			 pos++;                 /* trailing half frame at buffer end: drop this byte, resync */
+			 continue;
+		 }
+		 
+		 if(dataAgreeAnalys(&rxAGREEMENT,&pData[pos],frame_len) != AGREE_MEN_OK)
+		 {
+			 pos++;                 /* crc/head/footer mismatch: drop this byte, resync */
+			 continue;
+		 }
+		 
+		 if(portDev[index].sensors != NULL)
+		 {
+			 portDev[index].sensors->data_len = rxAGREEMENT.length;
+		 }
+		 port_data_parsing(index,rxAGREEMENT.sID,rxAGREEMENT.index,rxAGREEMENT.data);
+		 
+		 pos += frame_len;         /* skip the parsed frame */
 	 }
 }
  
@@ -842,7 +878,23 @@ void newAiMonitor(void) {
 									p = json_int(p, "y", dev_camer->data[base+3]<<8|dev_camer->data[base+4], &remLen);
 									p = json_int(p, "w", dev_camer->data[base+5]<<8|dev_camer->data[base+6], &remLen);
 									p = json_int(p, "h", dev_camer->data[base+7]<<8|dev_camer->data[base+8], &remLen);
-									p = json_int(p, "conf", dev_camer->data[base+9], &remLen);
+									/* conf byte: bit7=learned, low 7 bits = confidence 0~100 */
+									p = json_int(p, "conf", dev_camer->data[base+9] & 0x7F, &remLen);
+									p = json_int(p, "learned", dev_camer->data[base+9] >> 7, &remLen);
+									/* name: match by id into name-frame cache; emit only when present.
+									   Name in frame is NOT NUL-terminated, copy to local buffer. */
+									{
+										uint8_t nlen = 0;
+										const char *nm = camer_find_name(dev_camer, dev_camer->data[base], &nlen);
+										if (nm != NULL && nlen > 0)
+										{
+											char name_buf[256];
+											if (nlen >= sizeof(name_buf)) nlen = sizeof(name_buf) - 1;
+											memcpy(name_buf, nm, nlen);
+											name_buf[nlen] = '\0';
+											p = json_str(p, "name", name_buf, &remLen);
+										}
+									}
 									p = json_objClose(p, &remLen);
 								}
 								p = json_arrClose(p, &remLen);

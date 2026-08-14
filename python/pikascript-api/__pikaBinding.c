@@ -1731,16 +1731,50 @@ method_typedef(
     "cam_count", "port"
 );
 
-void _camer_cam_dataMethod(PikaObj *self, Args *_args_){
+void _camer_cam_dis_idMethod(PikaObj *self, Args *_args_){
     pika_float port = args_getFloat(_args_, "port");
-    pika_float id = args_getFloat(_args_, "id");
-    pika_float obj_id = args_getFloat(_args_, "obj_id");
-    pika_float res = _camer_cam_data(self, port, id, obj_id);
+    pika_float obj = args_getFloat(_args_, "obj");
+    pika_float data = args_getFloat(_args_, "data");
+    pika_float res = _camer_cam_dis_id(self, port, obj, data);
     method_returnFloat(_args_, res);
 }
 method_typedef(
-    _camer_cam_data,
-    "cam_data", "port,id,obj_id"
+    _camer_cam_dis_id,
+    "cam_dis_id", "port,obj,data"
+);
+
+void _camer_cam_dis_nameMethod(PikaObj *self, Args *_args_){
+    pika_float port = args_getFloat(_args_, "port");
+    pika_float obj = args_getFloat(_args_, "obj");
+    char* res = _camer_cam_dis_name(self, port, obj);
+    method_returnStr(_args_, res);
+}
+method_typedef(
+    _camer_cam_dis_name,
+    "cam_dis_name", "port,obj"
+);
+
+void _camer_cam_dis_obj_idMethod(PikaObj *self, Args *_args_){
+    pika_float port = args_getFloat(_args_, "port");
+    pika_float obj = args_getFloat(_args_, "obj");
+    pika_float data = args_getFloat(_args_, "data");
+    pika_float res = _camer_cam_dis_obj_id(self, port, obj, data);
+    method_returnFloat(_args_, res);
+}
+method_typedef(
+    _camer_cam_dis_obj_id,
+    "cam_dis_obj_id", "port,obj,data"
+);
+
+void _camer_cam_dis_obj_nameMethod(PikaObj *self, Args *_args_){
+    pika_float port = args_getFloat(_args_, "port");
+    pika_float obj = args_getFloat(_args_, "obj");
+    char* res = _camer_cam_dis_obj_name(self, port, obj);
+    method_returnStr(_args_, res);
+}
+method_typedef(
+    _camer_cam_dis_obj_name,
+    "cam_dis_obj_name", "port,obj"
 );
 
 void _camer_changer_camer_modeMethod(PikaObj *self, Args *_args_){
@@ -1753,22 +1787,25 @@ method_typedef(
     "changer_camer_mode", "port,mode"
 );
 
-void _camer_send_hw_modeMethod(PikaObj *self, Args *_args_){
+void _camer_changer_waite_camer_modeMethod(PikaObj *self, Args *_args_){
     pika_float port = args_getFloat(_args_, "port");
     pika_float mode = args_getFloat(_args_, "mode");
-    _camer_send_hw_mode(self, port, mode);
+    _camer_changer_waite_camer_mode(self, port, mode);
 }
 method_typedef(
-    _camer_send_hw_mode,
-    "send_hw_mode", "port,mode"
+    _camer_changer_waite_camer_mode,
+    "changer_waite_camer_mode", "port,mode"
 );
 
 class_def(_camer){
     __BEFORE_MOETHOD_DEF
-    method_def(_camer_cam_data, 153847919),
+    method_def(_camer_cam_dis_id, 46112065),
     method_def(_camer_changer_camer_mode, 243993096),
     method_def(_camer_cam_count, 781332862),
-    method_def(_camer_send_hw_mode, 1062276529),
+    method_def(_camer_cam_dis_name, 824094997),
+    method_def(_camer_changer_waite_camer_mode, 1112657057),
+    method_def(_camer_cam_dis_obj_name, 1184445711),
+    method_def(_camer_cam_dis_obj_id, 1978981051),
 };
 class_inhert(_camer, TinyObj);
 

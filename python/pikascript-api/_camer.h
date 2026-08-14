@@ -18,8 +18,11 @@
 PikaObj *New__camer(Args *args);
 
 pika_float _camer_cam_count(PikaObj *self, pika_float port);
-pika_float _camer_cam_data(PikaObj *self, pika_float port, pika_float id, pika_float obj_id);
+pika_float _camer_cam_dis_id(PikaObj *self, pika_float port, pika_float obj, pika_float data);
+char* _camer_cam_dis_name(PikaObj *self, pika_float port, pika_float obj);
+pika_float _camer_cam_dis_obj_id(PikaObj *self, pika_float port, pika_float obj, pika_float data);
+char* _camer_cam_dis_obj_name(PikaObj *self, pika_float port, pika_float obj);
 void _camer_changer_camer_mode(PikaObj *self, pika_float port, pika_float mode);
-void _camer_send_hw_mode(PikaObj *self, pika_float port, pika_float mode);
+void _camer_changer_waite_camer_mode(PikaObj *self, pika_float port, pika_float mode);
 
 #endif

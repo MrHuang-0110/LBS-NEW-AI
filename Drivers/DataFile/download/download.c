@@ -23,7 +23,8 @@ volatile bool SENSORD_STATE = false;
 
 static uint8_t __attribute__((section(".DTCM_Data"))) fileBufer[32*1024];
 static uint8_t __attribute__((section(".DMA_SRAM1_32KB"))) usb_ring_bufer[512];
-static uint8_t __attribute__((section(".DMA_SRAM1_32KB"))) blue_ring_bufer[512];
+/* BLUE ring buffer must be >= UART DMA RX buffer (600B) so one IDLE batch never truncates */
+static uint8_t __attribute__((section(".DMA_SRAM1_32KB"))) blue_ring_bufer[1024];
 static uint8_t __attribute__((section(".DMA_SRAM1_32KB"))) proces_ring_bufer[512];
  
 RingBuffer *getUSB_RingBuffer_Handle(void)

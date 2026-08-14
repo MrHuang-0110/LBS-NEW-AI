@@ -5,7 +5,11 @@
 #include "sys.h"
 
 
-#define UART_DMA_RX_TX_CACHE_BUFFER_SIZE 300
+/* RX/TX DMA buffer size. Must hold a merged burst: camera 0x04 data frame
+   (max 25 slots -> 257 B) + 0x0E name frame (max 257 B) can arrive back-to-back
+   in ONE DMA IDLE interrupt; a buffer smaller than the merged length causes
+   circular-DMA overwrite and frame loss. */
+#define UART_DMA_RX_TX_CACHE_BUFFER_SIZE 600
  
 typedef enum
 { 
