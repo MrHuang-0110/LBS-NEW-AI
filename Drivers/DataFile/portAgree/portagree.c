@@ -20,6 +20,7 @@
 #include "matchineState.h"
 #include "ringbufer.h"
 #include "camer.h" 
+#include "ir.h"
 #include "grayv2.h"
 
 static __PORT portDev[8];
@@ -61,6 +62,7 @@ static void port_linke(int portIndex,int id,uint8_t *data)
       {
 				  SENSORD_STATE = false;		
          		
+			    if(id == IR_WIRE_OBJECT_ID) id = DEV_ID_IR;   /* wire 0xA3 shared with DEV_ID_ULTRASION: map on the handshake path only */
 			    if(identify_and_bind(&portDev[portIndex],id,portIndex) == true)
 					{
 					     portDev[portIndex]._LinkeObjDev = id;		
@@ -70,6 +72,7 @@ static void port_linke(int portIndex,int id,uint8_t *data)
       else
 			{
 					portDev[portIndex]._LinkeObjDev = 0xEF;
+					portDev[portIndex].portTimeOutTick = 10;   /* 0xEF 设备同样刷新超时计数:插入时持续应答保持 0xEF,拔线停止应答后由 ResetScanPort 超时释放,监控不再残留 dev null */
 				  SENSORD_STATE = true;
 			}
 }
@@ -211,6 +214,9 @@ void FreeDevReFrechSource(uint8_t port)
 		 break;	 
 		 case DEV_ID_CAMER:
 			 free_camer(port);
+		 break;
+		 case DEV_ID_IR:
+			 free_dev_ir(port);
 		 break; 
 		 case DEV_ID_NFC:
 			 free_dev_nfc(port);
@@ -525,12 +531,12 @@ void FindProtDev(void)
                 if(portDev[i]._LinkeObjDev == DEV_ID_ULTRASION)
                 {
 											 changerUsartBaudrate(i, 9600);								
-											 return;			 
+											 continue;			 
                 }
                 else
                 {	
 											 changerUsartBaudrate(i, 115200);											
-											 return;				
+											 continue;				
                 }
             }
             MultiUart_SendFrame(devId, (uint8_t*)"Please Link",strlen("Please Link"),0x98,0x09, 10, 250);						
@@ -538,7 +544,7 @@ void FindProtDev(void)
         else
         {
  						if( portDev[i]._LinkeObjDev == 0xEF)
-						{MultiUart_SendFrame(devId, (uint8_t*)"Please Link", strlen("Please Link"),0x98,0x09, 10, 250);return;}
+						{MultiUart_SendFrame(devId, (uint8_t*)"Please Link", strlen("Please Link"),0x98,0x09, 10, 250);continue;}
             if(portDev[i]._LinkeObjDev == DEV_ID_ULTRASION)
             {
 						  if(filtered_voltage > NONE_MIN && filtered_voltage < NONE_MAX)
@@ -818,6 +824,13 @@ void newAiMonitor(void) {
                     p = json_objClose(p, &remLen);
                     break;
                 }
+																case DEV_ID_IR:{
+									 DEV_IR *dev_ir = read_ir((SensorBase *)portDev[i].sensors);
+										p = json_objOpen(p, "ir_remote", &remLen);
+										p = json_int(p, "state", dev_ir->state, &remLen);   /* 0=off 1=red 2=green 3=blue */
+										p = json_objClose(p, &remLen);
+									 break;
+								}
 								case DEV_ID_NFC:{ 
 								    DEV_NFC *dev_nfc = read_nfc((SensorBase *)portDev[i].sensors);
 										p = json_objOpen(p, "nfc", &remLen);
@@ -888,7 +901,11 @@ void newAiMonitor(void) {
 										const char *nm = camer_find_name(dev_camer, dev_camer->data[base], &nlen);
 										if (nm != NULL && nlen > 0)
 										{
-											char name_buf[256];
+											/* Bounded by the name-frame cache itself (DEV_CAMER.name_data[250]), so
+											   names are emitted in full - no arbitrary truncation. json-maker
+											   stops at remLen, and the strcpy target (blue monitor buffer) is
+											   now 10K like json_buffer, so nothing can overrun. */
+											char name_buf[sizeof(dev_camer->name_data) + 1];
 											if (nlen >= sizeof(name_buf)) nlen = sizeof(name_buf) - 1;
 											memcpy(name_buf, nm, nlen);
 											name_buf[nlen] = '\0';

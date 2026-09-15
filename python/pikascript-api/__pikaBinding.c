@@ -25,6 +25,7 @@
 #include "_color.h"
 #include "_gray.h"
 #include "_grayv2.h"
+#include "_ir.h"
 #include "_key.h"
 #include "_list.h"
 #include "_math.h"
@@ -245,6 +246,9 @@ PikaObj *New_PikaMain(Args *args){
 #endif
 #ifndef PIKA_MODULE__GRAYV2_DISABLE
     obj_newObj(self, "_grayv2", "_grayv2", New__grayv2);
+#endif
+#ifndef PIKA_MODULE__IR_DISABLE
+    obj_newObj(self, "_ir", "_ir", New__ir);
 #endif
 #ifndef PIKA_MODULE__KEY_DISABLE
     obj_newObj(self, "_key", "_key", New__key);
@@ -2167,6 +2171,30 @@ class_inhert(_grayv2, TinyObj);
 PikaObj *New__grayv2(Args *args){
     PikaObj *self = New_TinyObj(args);
     obj_setClass(self, _grayv2);
+    return self;
+}
+#endif
+
+#ifndef PIKA_MODULE__IR_DISABLE
+void _ir_set_rgbMethod(PikaObj *self, Args *_args_){
+    int port = args_getInt(_args_, "port");
+    int state = args_getInt(_args_, "state");
+    _ir_set_rgb(self, port, state);
+}
+method_typedef(
+    _ir_set_rgb,
+    "set_rgb", "port,state"
+);
+
+class_def(_ir){
+    __BEFORE_MOETHOD_DEF
+    method_def(_ir_set_rgb, 204149931),
+};
+class_inhert(_ir, TinyObj);
+
+PikaObj *New__ir(Args *args){
+    PikaObj *self = New_TinyObj(args);
+    obj_setClass(self, _ir);
     return self;
 }
 #endif

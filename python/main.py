@@ -21,4 +21,5 @@ import _list
 import _nfc
 import _camer
 import _grayv2
+import _ir
 import newai

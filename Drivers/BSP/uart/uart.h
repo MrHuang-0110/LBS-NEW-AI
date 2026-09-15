@@ -10,6 +10,13 @@
    in ONE DMA IDLE interrupt; a buffer smaller than the merged length causes
    circular-DMA overwrite and frame loss. */
 #define UART_DMA_RX_TX_CACHE_BUFFER_SIZE 600
+
+/* TX frame capacity. Deliberately SEPARATE from the RX DMA buffer above:
+   DEV_UartFrame_t is a stack local of MultiUart_SendFrame/MultiUart_SendMoreByte
+   and is also the devTxQueue item, so every extra byte here costs a byte of
+   stack in every caller (DEV_PORT_TX / DEV_ControlTask only have 1.5K stacks).
+   Largest payload ever sent is 128B (firmware download block) + 7B header. */
+#define UART_TX_FRAME_MAX 300
  
 typedef enum
 { 
@@ -36,7 +43,7 @@ typedef struct {
 #endif
 
 typedef struct {
-    uint8_t  pData[UART_DMA_RX_TX_CACHE_BUFFER_SIZE];       
+    uint8_t  pData[UART_TX_FRAME_MAX];       
     uint16_t len;         
     uint32_t timeout;     
     uint8_t priority;    
@@ -49,7 +56,7 @@ typedef struct {
     TaskHandle_t devTxHandle,devControlTaskHandle; 
 	  //DEV_UartFrame_t frame;
     uint32_t txCount;              
-    uint32_t errorCount; 
+    uint32_t errorCount;
     SemaphoreHandle_t txCompleteSem;	
 	  SemaphoreHandle_t  uartMutex;
 } UartDeviceContext_t;

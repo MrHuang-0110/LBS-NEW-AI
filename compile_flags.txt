@@ -34,6 +34,7 @@
 -I./Drivers/DataFile/color
 -I./Drivers/DataFile/gray
 -I./Drivers/DataFile/motor
+-I./Drivers/DataFile/ir
 -I./Drivers/DataFile/touch
 -I./Drivers/DataFile/ultrasion
 -I./Drivers/DataFile/dataStruct

@@ -50,7 +50,7 @@ bool ring_buffer_get(RingBuffer *rb, uint8_t *byte) {
     }
     
     *byte = rb->buffer[rb->tail];
-    rb->tail = (rb->tail + 1) % RX_BUFFER_SIZE;
+    rb->tail = (rb->tail + 1) % rb->size;   /* was RX_BUFFER_SIZE(512): desyncs once a ring is created with another size */
     rb->count--;
     
     return true;

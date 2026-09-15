@@ -18,6 +18,7 @@
 #include "color.h"
 #include "grayv2.h"
 #include "nfc_car.h"
+#include "ir.h"
 
 static uint8_t bat_level;
 
@@ -94,6 +95,27 @@ void SET_EVENT_GROUP_ISR(EventBits_t event)
         &xHigherPriorityTaskWoken
     );
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);  
+}
+/* FreeRTOS stack-overflow hook (configCHECK_FOR_STACK_OVERFLOW == 2).
+   Before this was enabled an overflow silently corrupted the heap block next
+   to the task stack (the prime suspect for silently dropped motor PWM frames).
+   Record the offender for the monitor JSON, report it, then reset instead of
+   running on corrupted memory. */
+volatile char g_stackOvTask[16] = {0};          /* offending task name, shown in monitor JSON */
+volatile uint8_t g_stackOvPending = 0;          /* set by the hook (PendSV), serviced by MatChineStateTask */
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+    uint8_t i;
+    (void)xTask;
+    if (pcTaskName != NULL)
+    {
+        for (i = 0; i < sizeof(g_stackOvTask) - 1 && pcTaskName[i] != '\0'; i++)
+            g_stackOvTask[i] = pcTaskName[i];
+        g_stackOvTask[i] = '\0';
+    }
+    /* PendSV context: no printf/NVIC_SystemReset here (USB_printf is not ISR
+       safe). MatChineStateTask reports the name over USB, then resets. */
+    g_stackOvPending = 1;
 }
 bool getRunState(void)
 { 
@@ -177,6 +199,10 @@ void vDevControlTask(void *pvParameters)
 								 
 								 case DEV_ID_NFC:
 									 refsh_nfc((DEV_NFC*)base,base->data);
+								 break;
+								 
+								 case DEV_ID_IR:
+									 refsh_ir((DEV_IR*)base,base->data);
 								 break;
 							 }
 						}
@@ -399,6 +425,16 @@ void MatChineStateTask(void *param)
 		extern void MX_USB_DEVICE_Init(void);
 		MX_USB_DEVICE_Init();				
     while(1) {
+        if(g_stackOvPending)   /* memory is already corrupted: report, then reset */
+        {
+            char name[16];
+            uint8_t k;
+            g_stackOvPending = 0;
+            for(k = 0; k < sizeof(name); k++) name[k] = g_stackOvTask[k];
+            USB_printf("[stackov] task=%s\r\n", name);
+            vTaskDelay(pdMS_TO_TICKS(100));   /* let USB flush */
+            NVIC_SystemReset();
+        }
         uxEvents = xEventGroupWaitBits(
             xEventGroup,
             EVENT_REFRESH_MATRIX|

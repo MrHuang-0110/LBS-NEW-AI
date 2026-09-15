@@ -413,7 +413,7 @@ void downloadFile(uint8_t port,RingBuffer *q)
 	
 	 memset(data,0,sizeof(data));
 	
-   length = ring_buffer_read(q,data,512 - ring_buffer_space(q));
+   length = ring_buffer_read(q,data,q->size - ring_buffer_space(q));   /* ring size is no longer always 512 */
 	 
 	 _AGREEMENT rxAGREEMENT;
 	 
@@ -521,9 +521,9 @@ void downloadFile(uint8_t port,RingBuffer *q)
 }
 void initdownloadResource(void)
 { 
-  ring_buffer_init(&USB_RingBufer,usb_ring_bufer,512);
-	ring_buffer_init(&BLUE_RingBufer,blue_ring_bufer,512);
-	ring_buffer_init(&PROCES_RingBufer,proces_ring_bufer,512);
+  ring_buffer_init(&USB_RingBufer,usb_ring_bufer,sizeof(usb_ring_bufer));
+	ring_buffer_init(&BLUE_RingBufer,blue_ring_bufer,sizeof(blue_ring_bufer));   /* 1024: one merged DMA batch (<=600B) must fit */
+	ring_buffer_init(&PROCES_RingBufer,proces_ring_bufer,sizeof(proces_ring_bufer));
 	
 //	if(iofile.fileData !=NULL)
 	//{

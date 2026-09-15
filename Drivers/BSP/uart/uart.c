@@ -825,6 +825,7 @@ BaseType_t MultiUart_SendMoreByte(UartDevice_t devId, uint8_t *data, uint16_t le
 		if(devId >= UART_DEV_NUM) return pdFALSE;
     
     UartDeviceContext_t *pDev = &uartDevices[devId];
+    if(len > UART_TX_FRAME_MAX) return pdFALSE;  /* frame.pData is UART_TX_FRAME_MAX */
     DEV_UartFrame_t frame; 
 	  memset((DEV_UartFrame_t*)&frame,0,sizeof(DEV_UartFrame_t));
 	
@@ -855,6 +856,7 @@ BaseType_t MultiUart_SendMoreByteISR(UartDevice_t devId, uint8_t *data, uint16_t
     
     UartDeviceContext_t *pDev = &uartDevices[devId]; 
     DEV_UartFrame_t frame; 
+    if(len > UART_TX_FRAME_MAX) return pdFALSE;  /* frame.pData is UART_TX_FRAME_MAX */
     memset((DEV_UartFrame_t*)&frame,0,sizeof(DEV_UartFrame_t));	
 	  memcpy(frame.pData,data,len);
 	
@@ -896,6 +898,7 @@ BaseType_t MultiUart_SendFrame(UartDevice_t devId,
     if(devId >= UART_DEV_NUM) return pdFALSE;
     
     UartDeviceContext_t *pDev = &uartDevices[devId];
+	  if(len + 7 > UART_TX_FRAME_MAX) return pdFALSE;  /* frame.pData is UART_TX_FRAME_MAX */
 	  DEV_UartFrame_t frame;
 	
     memset((DEV_UartFrame_t*)&frame,0,sizeof(DEV_UartFrame_t));	
@@ -958,6 +961,7 @@ BaseType_t MultiUart_SendFrame_FromISR(UartDevice_t devId,
     
     UartDeviceContext_t *pDev = &uartDevices[devId];
     BaseType_t xResult;
+    if(len + 7 > UART_TX_FRAME_MAX) return pdFALSE;  /* frame.pData is UART_TX_FRAME_MAX */
     DEV_UartFrame_t frame;
     memset((DEV_UartFrame_t*)&frame,0,sizeof(DEV_UartFrame_t));	
 	  memcpy(frame.pData,data,len);
@@ -1324,8 +1328,8 @@ void MultiUart_Init(void)
 		if(uartDevices[i].uartMutex == NULL || uartDevices[i].txCompleteSem == NULL){while(1);}
 		uartDevices[i].devTxQueue = xQueueCreate(1, sizeof(DEV_UartFrame_t));
 		uartDevices[i].devControlQueue = xQueueCreate(32, sizeof(void *));
-    xTaskCreate(vDevUartSendTask, "DEV_PORT_TX", 256, (void*)i, configMAX_PRIORITIES - 1, &uartDevices[i].devTxHandle);
-		xTaskCreate(vDevControlTask,  "DEV_ControlTask", 256, (void*)i, configMAX_PRIORITIES - 2, &uartDevices[i].devControlTaskHandle);	    
+    xTaskCreate(vDevUartSendTask, "DEV_PORT_TX", 384, (void*)i, configMAX_PRIORITIES - 1, &uartDevices[i].devTxHandle);
+		xTaskCreate(vDevControlTask,  "DEV_ControlTask", 384, (void*)i, configMAX_PRIORITIES - 2, &uartDevices[i].devControlTaskHandle);	    
 	 }
 
     // 初始化串口BLUE
@@ -1334,12 +1338,12 @@ void MultiUart_Init(void)
 		uartDevices[BLUE].uartMutex = xSemaphoreCreateMutex();		
 		if(uartDevices[BLUE].uartMutex == NULL || uartDevices[BLUE].txCompleteSem == NULL){while(1);}
 		uartDevices[BLUE].devTxQueue = xQueueCreate(1, sizeof(DEV_UartFrame_t));
-		xTaskCreate(vDevUartSendTask, "BLUE_TX", 256, (void*)BLUE, configMAX_PRIORITIES - 2, &uartDevices[BLUE].devTxHandle);
+		xTaskCreate(vDevUartSendTask, "BLUE_TX", 384, (void*)BLUE, configMAX_PRIORITIES - 2, &uartDevices[BLUE].devTxHandle);
 		
     // 初始化串口USB
     uartDevices[USB].huart = NULL;
 	  uartDevices[USB].devTxQueue = xQueueCreate(1, sizeof(DEV_UartFrame_t));
-		xTaskCreate(vDevUartSendTask, "USB_TX", 256, (void*)USB,  configMAX_PRIORITIES - 2, &uartDevices[USB].devTxHandle); 	
+		xTaskCreate(vDevUartSendTask, "USB_TX", 384, (void*)USB,  configMAX_PRIORITIES - 2, &uartDevices[USB].devTxHandle); 	
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {

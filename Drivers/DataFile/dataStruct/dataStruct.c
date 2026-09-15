@@ -8,6 +8,7 @@
 #include "nfc_car.h"
 #include "camer.h"
 #include "grayv2.h"
+#include "ir.h"
 
 bool identify_and_bind(__PORT *manager,uint8_t devId,uint8_t index) {
 	
@@ -122,6 +123,16 @@ bool identify_and_bind(__PORT *manager,uint8_t devId,uint8_t index) {
 				else
 					return false; 		
 		  break;
+			case DEV_ID_IR:
+				manager->sensors = (SensorBase*)create_ir(index);
+			  if(manager->sensors!=NULL)
+				{
+					manager->sensors->setParam = setAck;
+				}
+				else
+					return false;
+			break;
+			
 			/*....*/
 		}
 		return true;
@@ -133,7 +144,7 @@ void setAck(void* self, uint8_t *data)
  
 	 SensorBase *base = (SensorBase*)self;
 	  memset(base->data, 0, sizeof(base->data));
-	 if(base->type == DEV_ID_GRAY_V2 || base->type == DEV_ID_BIG_MOTOR || base->type == DEV_ID_SMALL_Motor || base->type == DEV_ID_COLOR || base->type == DEV_ID_CAMER)
+	 if(base->type == DEV_ID_GRAY_V2 || base->type == DEV_ID_BIG_MOTOR || base->type == DEV_ID_SMALL_Motor || base->type == DEV_ID_COLOR || base->type == DEV_ID_CAMER || base->type == DEV_ID_IR)
 	 {
 		   memcpy(base->data, data,sizeof(base->data));
 	 }

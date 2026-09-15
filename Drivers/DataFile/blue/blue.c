@@ -2,7 +2,7 @@
 #include "uart.h"
 //#include "malloc.h"
 static BLUE_CONFIG blueStruct;
-static char __attribute__((section(".DTCM_Data"))) monitor_blue_buffer[2*1024]; 
+static char __attribute__((section(".DTCM_Data"))) monitor_blue_buffer[10*1024];   /* must hold the whole 10K monitor JSON (strcpy target) */ 
  
  
 BLUE_CONFIG *blueHandle(void)

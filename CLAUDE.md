@@ -35,7 +35,7 @@ Single entry chain; understanding this is prerequisite to touching anything:
 All events are bits on a single `EventGroupHandle_t xEventGroup` (defined in [matchineState.h](Drivers/DataFile/machine/matchineState.h)):
 
 | Event | Bit | Triggered by | Handled in |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `EVENT_REFRESH_MATRIX` | 0 | Timer/key events | `MatChineStateTask` main loop |
 | `EVENT_SEND_MONITOR` | 1 | 30 ms timer | `newAiMonitor()` sends JSON sensor data over USB |
 | `EVENT_FIND_PORT_DEV` | 2 | 50 ms timer | `FindProtDev()` — scans ports for attached devices |
@@ -72,7 +72,7 @@ Sensors and actuators are addressed through a multi-UART abstraction in [matchin
 
 1. Sends a link query frame to the device (`DEV_PORT_LINKE` command).
 2. Device responds with a string — if it contains `"Play Aplication"`, the device is identified and `identify_and_bind()` creates the appropriate typed device struct (e.g., `DEV_MOTOR`, `DEV_GRAY`).
-3. Device IDs: `DEV_ID_BIG_MOTOR` (0xA1), `DEV_ID_SMALL_Motor` (0xA6), `DEV_ID_GRAY` (0xA2), `DEV_ID_TOUCH` (0xA3), `DEV_ID_ULTRASION` (0xA4), `DEV_ID_COLOR` (0xA5), `DEV_ID_CAMER` (0xA7), `DEV_ID_GRAY_V2` (0xB0), `DEV_ID_NFC` (0xA8).
+3. Device IDs (as defined in the module headers): `DEV_ID_BIG_MOTOR` (0xA1), `DEV_ID_COLOR` (0xA2), `DEV_ID_ULTRASION` (0xA3), `DEV_ID_TOUCH` (0xA4), `DEV_ID_SMALL_Motor` (0xA6), `DEV_ID_CAMER` (0xA7), `DEV_ID_GRAY` (0xA9), `DEV_ID_GRAY_V2` (0xB0), `DEV_ID_NFC` (0xB2). `DEV_ID_IR` (0xB3) is host-internal only: the IR_REMOTE device reports the wire ObjectID `0xA3` on its handshake, so `port_linke()` maps it to `DEV_ID_IR` and the ADC-detected ultrasonic keeps `0xA3`.
 
 ### Wire protocol
 
@@ -126,6 +126,15 @@ A `FrameParser` state machine (`STATE_IDLE` → `STATE_HEADER` → `STATE_SRC_ID
 - Modes: `CAMER_MENU_TYPE`, `CAMER_MODE_TYPE`, `CAMER_FACE_TYPE`, `CAMER_LABE_TYPE`, `CAMER_OBJECT_TYPE`, `CAMER_COLOR_TYPE`, `CAMER_WAY_TYPE`, `CAMER_GESTURE_TYPE`, `CAMER_BODY_TYPE`, `CAMER_OBJECT_BODY_TYPE`, `CAMER_PHOTO_TYPE`.
 - Python API: `isDetect()`, `get_id()`, `get_x()`, `get_y()`, `get_w()`, `get_h()`, `mode()`, `photo()`, `get_photo()`.
 
+### IR remote (`_ir.pyi` / `pikascript-lib/ir/_ir.c`)
+
+- Wire ObjectID `0xA3` (same value as `DEV_ID_ULTRASION`), host-internal `DEV_ID_IR` (0xB3). Handshake
+  reply is `"Play Aplication"` (sic, misspelled on purpose in the device firmware).
+- Uplink `0xED` every 10 ms: packed `{state, bat}` - **no version field** (unlike motor/color/gray).
+  `state` is the last commanded colour (0=off 1=red 2=green 3=blue), not a receiver acknowledgement;
+  `bat` is the receiver battery 0..100, `0xFF` = unknown.
+- Downlink `0xD1` + 1 byte state. Python API: `set_rgb(port, state)`.
+
 ### NFC (`_nfc.pyi` / `pikascript-lib/nfc/_nfc.c`)
 
 - `DEV_ID_NFC` (0xA8). NFC tag reader/writer.
@@ -140,6 +149,7 @@ User-facing Python API is defined by `*.pyi` stubs in `python/` (e.g. `_motor.py
 - `python/pikascript-lib/<module>/_<module>.c` — the **hand-written** native C implementations behind each Python module (e.g. `pikascript-lib/motor/_motor.c` implements what `_motor.pyi` declares). This is where you change native behavior.
 
 Tooling in `python/`:
+
 - `pikaPackage.exe` — the PikaScript compiler/bundler. **After editing any `.pyi` or `.py` you must re-run this** to regenerate `pikascript-api/` bindings and bytecode, then rebuild the firmware. There is no prebuild hook in the Keil project (`<BeforeMake>` is empty), so regeneration is manual.
 - `rust-msc-latest-win10.exe` — underlying rust-based Pika compiler.
 - `requestment.txt` — PikaScript package versions (pikascript-core==v1.13.4, PikaStdLib==v1.13.4, _thread==v0.0.7, time==v0.2.2, math==v0.1.1, random==v0.1.4).
@@ -167,6 +177,7 @@ At runtime, user programs are **not** compiled on-device. `runPython()` in [Driv
 ## PID control
 
 `Middle/PID_CONTROL/pid_control.h` provides:
+
 - `PIController` — PI controller with `Kp`, `Ki`, `integral`, `out_limit`, `integral_limit`.
 - `PositionController` — PID position controller with `Kp`, `Ki`, `Kd`, `target_pos`.
 - Functions: `PI_Init`, `PI_Compute`, `PI_Reset`, `Pos_Init`, `Pos_Compute`, `Pos_SetTarget`.
@@ -176,6 +187,7 @@ Used by motor control (`MOTOR_CONTROL` uses `PositionController` + `PIController
 ## Filter system
 
 [Drivers/DataFile/filter/](Drivers/DataFile/filter/) provides:
+
 - `AdaptiveFilter` — adaptive filter with configurable min/max alpha and speed threshold.
 - `DualMotorSyncController` — dual-motor synchronization controller with speed difference tracking, filtering, and sync adjustment calculation.
 
