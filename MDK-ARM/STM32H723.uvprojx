@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32H723xx,PIKA_CONFIG_ENABLE</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;..\Middle\SYSTEM;..\Drivers\BSP\adc;..\Drivers\BSP\dac;..\Drivers\BSP\gpio;..\Drivers\BSP\iic;..\Drivers\BSP\iwdg;..\Drivers\BSP\ospi;..\Drivers\BSP\spi;..\Drivers\BSP\tim;..\Drivers\BSP\uart;..\Middle\DELAY;..\USB\Core\Inc;..\USB\Class\CDC\Inc;..\USB\App;..\USB\Target;..\FATFS;..\Drivers\User\w25qxx;..\Drivers\User\matrix;..\Drivers\User\key;..\FreeRTOS\include;..\FreeRTOS\portable\RVDS\ARM_CM7\r0p1;..\Middle\File_IO;..\Drivers\User\music;..\Drivers\DataFile\rawMatrix;..\Drivers\DataFile\list;..\Drivers\DataFile\machine;..\Drivers\DataFile\portAgree;..\Drivers\DataFile\color;..\Drivers\DataFile\gray;..\Drivers\DataFile\motor;..\Drivers\DataFile\touch;..\Drivers\DataFile\ultrasion;..\Drivers\DataFile\dataStruct;..\Drivers\DataFile\cjson;..\Drivers\DataFile\download;..\Drivers\DataFile\ringbufer;..\Drivers\DataFile\entery;..\Drivers\DataFile\blue;..\python\pikascript-core;..\python\pikascript-api;..\Drivers\DataFile\message;..\STM32_MotionFX_Library\Inc;..\Drivers\DataFile\mem;..\Drivers\DataFile\strlist;..\Drivers\DataFile\remote;..\Drivers\User\os;..\Drivers\DataFile\filter;..\Drivers\DataFile\valueType;..\Middle\CTL_CMD;..\Drivers\DataFile\nfc;..\Drivers\DataFile\camer;..\Middle\PID_CONTROL;..\Drivers\DataFile\grayv2;..\Drivers\DataFile\ir;..\Middle\AI\Inc;..\X-CUBE-AI\App</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;..\Middle\SYSTEM;..\Drivers\BSP\adc;..\Drivers\BSP\dac;..\Drivers\BSP\gpio;..\Drivers\BSP\iic;..\Drivers\BSP\iwdg;..\Drivers\BSP\ospi;..\Drivers\BSP\spi;..\Drivers\BSP\tim;..\Drivers\BSP\uart;..\Middle\DELAY;..\USB\Core\Inc;..\USB\Class\CDC\Inc;..\USB\App;..\USB\Target;..\FATFS;..\Drivers\User\w25qxx;..\Drivers\User\matrix;..\Drivers\User\key;..\FreeRTOS\include;..\FreeRTOS\portable\RVDS\ARM_CM7\r0p1;..\Middle\File_IO;..\Drivers\User\music;..\Drivers\DataFile\rawMatrix;..\Drivers\DataFile\list;..\Drivers\DataFile\machine;..\Drivers\DataFile\portAgree;..\Drivers\DataFile\color;..\Drivers\DataFile\gray;..\Drivers\DataFile\motor;..\Drivers\DataFile\touch;..\Drivers\DataFile\ultrasion;..\Drivers\DataFile\dataStruct;..\Drivers\DataFile\cjson;..\Drivers\DataFile\download;..\Drivers\DataFile\ringbufer;..\Drivers\DataFile\entery;..\Drivers\DataFile\blue;..\python\pikascript-core;..\python\pikascript-api;..\Drivers\DataFile\message;..\STM32_MotionFX_Library\Inc;..\Drivers\DataFile\mem;..\Drivers\DataFile\strlist;..\Drivers\DataFile\remote;..\Drivers\User\os;..\Drivers\DataFile\filter;..\Drivers\DataFile\valueType;..\Middle\CTL_CMD;..\Drivers\DataFile\nfc;..\Drivers\DataFile\camer;..\Middle\PID_CONTROL;..\Drivers\DataFile\grayv2;..\Drivers\DataFile\ir;..\Drivers\DataFile\elect_sensor;..\Middle\AI\Inc;..\X-CUBE-AI\App</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -443,6 +443,11 @@
               <FileName>ir.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Drivers\DataFile\ir\ir.c</FilePath>
+            </File>
+            <File>
+              <FileName>elect_sensor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Drivers\DataFile\elect_sensor\elect_sensor.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -1441,6 +1446,11 @@
               <FileName>_ir.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\python\pikascript-lib\ir\_ir.c</FilePath>
+            </File>
+            <File>
+              <FileName>_elect_sensor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\python\pikascript-lib\elect_sensor\_elect_sensor.c</FilePath>
             </File>
           </Files>
         </Group>

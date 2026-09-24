@@ -9,6 +9,7 @@
 #include "camer.h"
 #include "grayv2.h"
 #include "ir.h"
+#include "elect_sensor.h"
 
 bool identify_and_bind(__PORT *manager,uint8_t devId,uint8_t index) {
 	
@@ -132,6 +133,16 @@ bool identify_and_bind(__PORT *manager,uint8_t devId,uint8_t index) {
 				else
 					return false;
 			break;
+
+			case DEV_ID_ELECT_SENSOR:
+				manager->sensors = (SensorBase*)create_elect_sensor(index);
+			  if(manager->sensors!=NULL)
+				{
+					manager->sensors->setParam = setAck;
+				}
+				else
+					return false;
+			break;
 			
 			/*....*/
 		}
@@ -144,7 +155,7 @@ void setAck(void* self, uint8_t *data)
  
 	 SensorBase *base = (SensorBase*)self;
 	  memset(base->data, 0, sizeof(base->data));
-	 if(base->type == DEV_ID_GRAY_V2 || base->type == DEV_ID_BIG_MOTOR || base->type == DEV_ID_SMALL_Motor || base->type == DEV_ID_COLOR || base->type == DEV_ID_CAMER || base->type == DEV_ID_IR)
+	 if(base->type == DEV_ID_GRAY_V2 || base->type == DEV_ID_BIG_MOTOR || base->type == DEV_ID_SMALL_Motor || base->type == DEV_ID_COLOR || base->type == DEV_ID_CAMER || base->type == DEV_ID_IR || base->type == DEV_ID_ELECT_SENSOR)
 	 {
 		   memcpy(base->data, data,sizeof(base->data));
 	 }

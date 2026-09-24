@@ -21,6 +21,7 @@
 #include "ringbufer.h"
 #include "camer.h" 
 #include "ir.h"
+#include "elect_sensor.h"
 #include "grayv2.h"
 
 static __PORT portDev[8];
@@ -223,6 +224,9 @@ void FreeDevReFrechSource(uint8_t port)
 		 break;
 		 case DEV_ID_GRAY_V2:
 			 free_gray_v2(port);
+		 break;
+		 case DEV_ID_ELECT_SENSOR:
+			 free_dev_elect_sensor(port);
 		 break;
 		}
 	  portDev[port]._LinkeObjDev = 0;
@@ -590,6 +594,15 @@ void FindProtDev(void)
                     set_sensor_parameter(portDev[i].sensors, &touchState);												
                 }
             }				
+            else if(portDev[i]._LinkeObjDev == DEV_ID_ELECT_SENSOR)
+            {
+                /* 0xED echo still differs from what the user program asked for:
+                   re-send it. Covers a command frame dropped by the depth-1 TX
+                   queue AND the coil-off forced by a re-handshake / device reset,
+                   both of which the vendor protocol requires the host to recover
+                   from. The command is idempotent. */
+                elect_sensor_poll(read_elect_sensor(portDev[i].sensors));
+            }
         }
     }
 }
@@ -828,6 +841,16 @@ void newAiMonitor(void) {
 									 DEV_IR *dev_ir = read_ir((SensorBase *)portDev[i].sensors);
 										p = json_objOpen(p, "ir_remote", &remLen);
 										p = json_int(p, "state", dev_ir->state, &remLen);   /* 0=off 1=red 2=green 3=blue */
+										p = json_objClose(p, &remLen);
+									 break;
+								}
+								case DEV_ID_ELECT_SENSOR:{
+									 DEV_ELECT_SENSOR *dev_elect = read_elect_sensor((SensorBase *)portDev[i].sensors);
+										p = json_objOpen(p, "elect_sensor", &remLen);
+										p = json_int(p, "state", dev_elect->state, &remLen);   /* 0=released 1=engaged, command echo only */
+										uint16_t software_version;
+										getdevSoftware(portDev[i]._LinkeObjDev, &software_version);
+										p = json_int(p, "SoftwareVersion", software_version, &remLen);
 										p = json_objClose(p, &remLen);
 									 break;
 								}

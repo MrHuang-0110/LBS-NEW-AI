@@ -53,6 +53,7 @@ PikaObj *pikaPythonInit(void){
             "import _camer\n"
             "import _grayv2\n"
             "import _ir\n"
+            "import _elect_sensor\n"
             "import newai\n"
             "\n");
 #else 

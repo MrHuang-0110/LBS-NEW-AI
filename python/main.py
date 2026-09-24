@@ -22,4 +22,5 @@ import _nfc
 import _camer
 import _grayv2
 import _ir
+import _elect_sensor
 import newai

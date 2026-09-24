@@ -23,6 +23,7 @@
 #include "PikaStdTask.h"
 #include "_camer.h"
 #include "_color.h"
+#include "_elect_sensor.h"
 #include "_gray.h"
 #include "_grayv2.h"
 #include "_ir.h"
@@ -240,6 +241,9 @@ PikaObj *New_PikaMain(Args *args){
 #endif
 #ifndef PIKA_MODULE__COLOR_DISABLE
     obj_newObj(self, "_color", "_color", New__color);
+#endif
+#ifndef PIKA_MODULE__ELECT_SENSOR_DISABLE
+    obj_newObj(self, "_elect_sensor", "_elect_sensor", New__elect_sensor);
 #endif
 #ifndef PIKA_MODULE__GRAY_DISABLE
     obj_newObj(self, "_gray", "_gray", New__gray);
@@ -1917,6 +1921,30 @@ class_inhert(_color, TinyObj);
 PikaObj *New__color(Args *args){
     PikaObj *self = New_TinyObj(args);
     obj_setClass(self, _color);
+    return self;
+}
+#endif
+
+#ifndef PIKA_MODULE__ELECT_SENSOR_DISABLE
+void _elect_sensor_set_stateMethod(PikaObj *self, Args *_args_){
+    int port = args_getInt(_args_, "port");
+    int state = args_getInt(_args_, "state");
+    _elect_sensor_set_state(self, port, state);
+}
+method_typedef(
+    _elect_sensor_set_state,
+    "set_state", "port,state"
+);
+
+class_def(_elect_sensor){
+    __BEFORE_MOETHOD_DEF
+    method_def(_elect_sensor_set_state, 1130115057),
+};
+class_inhert(_elect_sensor, TinyObj);
+
+PikaObj *New__elect_sensor(Args *args){
+    PikaObj *self = New_TinyObj(args);
+    obj_setClass(self, _elect_sensor);
     return self;
 }
 #endif

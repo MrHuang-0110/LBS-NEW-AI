@@ -17,6 +17,8 @@ typedef struct
   uint32_t total,free;
 	uint8_t  defaultKeyUI,UInum;
 	uint16_t verBigMotor,verSmalMotor,verColor,verGray,verGrayV2,newAIversion;
+	/* appended after the existing fields so the system.cfg layout stays compatible */
+	uint16_t verElectSensor;
 }_DEV_CFG;
 
 void fatfsInit(void);

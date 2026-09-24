@@ -64,7 +64,7 @@ Sensors and actuators are addressed through a multi-UART abstraction in [matchin
 
 - `MultiUart_Init()` (in [uart.c](Drivers/BSP/uart/)) — initializes all UART peripherals. Each UART gets a device context (`UartDeviceContext_t`) with its own `devControlQueue`, `devTxQueue`, `uartMutex`, and `txCompleteSem`.
 - `vDevControlTask` / `vDevUartSendTask` — one instance per UART, draining `devControlQueue` (incoming sensor data) / `devTxQueue` (outgoing commands).
-- `vDevControlTask` dispatches by `SensorBase->type` to `refsh_motor`, `refsh_gray`, `refsh_color`, `refsh_touch`, `refsh_ultrasion`, `refsh_camer`, `refsh_gray_v2`, `refsh_nfc`.
+- `vDevControlTask` dispatches by `SensorBase->type` to `refsh_motor`, `refsh_gray`, `refsh_color`, `refsh_touch`, `refsh_ultrasion`, `refsh_camer`, `refsh_gray_v2`, `refsh_nfc`, `refsh_ir`, `refsh_elect_sensor`.
 
 ### Device identification protocol
 
@@ -72,7 +72,7 @@ Sensors and actuators are addressed through a multi-UART abstraction in [matchin
 
 1. Sends a link query frame to the device (`DEV_PORT_LINKE` command).
 2. Device responds with a string — if it contains `"Play Aplication"`, the device is identified and `identify_and_bind()` creates the appropriate typed device struct (e.g., `DEV_MOTOR`, `DEV_GRAY`).
-3. Device IDs (as defined in the module headers): `DEV_ID_BIG_MOTOR` (0xA1), `DEV_ID_COLOR` (0xA2), `DEV_ID_ULTRASION` (0xA3), `DEV_ID_TOUCH` (0xA4), `DEV_ID_SMALL_Motor` (0xA6), `DEV_ID_CAMER` (0xA7), `DEV_ID_GRAY` (0xA9), `DEV_ID_GRAY_V2` (0xB0), `DEV_ID_NFC` (0xB2). `DEV_ID_IR` (0xB3) is host-internal only: the IR_REMOTE device reports the wire ObjectID `0xA3` on its handshake, so `port_linke()` maps it to `DEV_ID_IR` and the ADC-detected ultrasonic keeps `0xA3`.
+3. Device IDs (as defined in the module headers): `DEV_ID_BIG_MOTOR` (0xA1), `DEV_ID_COLOR` (0xA2), `DEV_ID_ULTRASION` (0xA3), `DEV_ID_TOUCH` (0xA4), `DEV_ID_SMALL_Motor` (0xA6), `DEV_ID_CAMER` (0xA7), `DEV_ID_GRAY` (0xA9), `DEV_ID_GRAY_V2` (0xB0), `DEV_ID_NFC` (0xB2). `DEV_ID_IR` (0xB3) is host-internal only: the IR_REMOTE device reports the wire ObjectID `0xA3` on its handshake, so `port_linke()` maps it to `DEV_ID_IR` and the ADC-detected ultrasonic keeps `0xA3`. `DEV_ID_ELECT_SENSOR` (0xE0) uses the handshake ObjectID directly — no internal ID mapping.
 
 ### Wire protocol
 
@@ -135,10 +135,69 @@ A `FrameParser` state machine (`STATE_IDLE` → `STATE_HEADER` → `STATE_SRC_ID
   `bat` is the receiver battery 0..100, `0xFF` = unknown.
 - Downlink `0xD1` + 1 byte state. Python API: `set_rgb(port, state)`.
 
+### Elect sensor (`_elect_sensor.pyi` / `pikascript-lib/elect_sensor/_elect_sensor.c`)
+
+- `DEV_ID_ELECT_SENSOR` (0xE0) — electromagnetic engagement sensor. The handshake ObjectID is used
+directly as the host device ID; there is no internal ID mapping.
+- Uplink `0xED`, payload = **exactly 1 byte** command state: `0` = released, `1` = engaged. A frame
+  whose length is not 1, or whose state byte is outside 0/1, is ignored and the last valid state is
+  kept.
+- Downlink `0xD1` with an **empty** payload = engage, `0xD2` with an **empty** payload = release.
+  The device requires exactly 7 bytes (`len == 0`) delivered as **one contiguous burst** — it
+  delimits frames with the USART IDLE interrupt and its `0xD1`/`0xD2` handlers additionally require
+  `rx_data->len >= 7`, so a command split across writes is ignored.
+- **Delivery model (do not make this fire-and-forget).** The device sends no ACK and the host's TX
+  queue is depth 1 with a 10 ms timeout, so a single command frame can be dropped silently. The
+  device also forces both outputs off on *every* handshake, so a reconnect/reset/re-handshake drops
+  an engaged coil. The vendor protocol therefore requires the host to (a) re-send while `0xED` does
+  not echo the requested state and (b) restore the requested state after a re-handshake; the command
+  is idempotent and 10 Hz is explicitly allowed. `set_state()` sends immediately, then
+  `elect_sensor_poll()` — called from the existing 50 ms port scan, no new timer — re-sends while the
+  echo differs (worst case ~100 ms to recover).
+- A full unplug/replug frees the port and `create_elect_sensor()` resets the requested state to 0, so
+  a physical reconnect never re-energises the coil on its own; only an explicit `set_state(port, 1)`
+  does. A re-handshake *without* losing the port does restore the state the user program asked for.
+- The echoed `state` is a command echo, **not** physical coil/contact feedback.
+- Python API: `set_state(port, state)`. Out-of-range ports/states and ports without a bound 0xE0
+  device are silently ignored. Monitor JSON: `elect_sensor.state` (device echo),
+  `elect_sensor.SoftwareVersion`.
+
 ### NFC (`_nfc.pyi` / `pikascript-lib/nfc/_nfc.c`)
 
 - `DEV_ID_NFC` (0xA8). NFC tag reader/writer.
 - Python API: `read()`, `write()`.
+
+## Sensor firmware update (IAP)
+
+Device firmware is updated from the host over the device's own port by `sensord_updata()` in
+[download.c](Drivers/DataFile/download/download.c). It is triggered by the `0x32` command and only
+runs while `getRunState()` is false (no user program active). The sequence per port is:
+
+| Step | Frame | Notes |
+| --- | --- | --- |
+| 1 | `0xEE` + `"1"` soft reset | device reboots into its bootloader, which then handshakes with `"Not Aplication"` (host sees `_LinkeObjDev == 0xEF`) |
+| 2 | `0x08` + `"0"` | keepalive/ack gate before flashing |
+| 3 | `0xAA` | firmware payload, 128 bytes per frame |
+| 4 | `0xBB` | version string, written after the last chunk |
+| 5 | `0xFE` | jump back to the application |
+
+Per-device file mapping, resolved by `_read_sensord_bin()`, `_read_sensord_versionfile()` and
+`getdevSoftware()` in [devfile.c](Middle/File_IO/devfile.c):
+
+| `DEV_ID_*` | Firmware image | Version file |
+| --- | --- | --- |
+| `DEV_ID_BIG_MOTOR` (0xA1) | `1:app/motor.bin` | `1:version/BigMotorVersion.txt` |
+| `DEV_ID_COLOR` (0xA2) | `1:app/color.bin` | `1:version/ColorVersion.txt` |
+| `DEV_ID_SMALL_Motor` (0xA6) | `1:app/small_motor.bin` | `1:version/MiddleMotorVersion.txt` |
+| `DEV_ID_GRAY` (0xA9) | `1:app/gray.bin` | `1:version/gray.txt` |
+| `DEV_ID_GRAY_V2` (0xB0) | `1:app/grayv2.bin` | `1:version/grayv2.txt` |
+| `DEV_ID_ELECT_SENSOR` (0xE0) | `1:app/elect_sensor.bin` | `1:version/elect_sensor.txt` |
+
+`_DEV_CFG` in [devfile.h](Middle/File_IO/devfile.h) caches the versions read at boot by
+`fatfsInit()`; `verElectSensor` was **appended** after the existing fields so the on-flash
+`1:system.cfg` layout stays compatible. A missing image, a missing/zero version, or any bootloader
+ACK timeout takes the existing error path (`showError()` + abort, no success prompt) — success is
+only shown after the `0xBB` version write is acknowledged.
 
 ## PikaScript (Python) toolchain — read before editing `python/`
 
@@ -150,8 +209,8 @@ User-facing Python API is defined by `*.pyi` stubs in `python/` (e.g. `_motor.py
 
 Tooling in `python/`:
 
-- `pikaPackage.exe` — the PikaScript compiler/bundler. **After editing any `.pyi` or `.py` you must re-run this** to regenerate `pikascript-api/` bindings and bytecode, then rebuild the firmware. There is no prebuild hook in the Keil project (`<BeforeMake>` is empty), so regeneration is manual.
-- `rust-msc-latest-win10.exe` — underlying rust-based Pika compiler.
+- `rust-msc-latest-win10.exe` — the rust-based Pika compiler that actually generates the bindings. **After editing any `.pyi` or `.py` you must re-run this** (`python/rust-msc-latest-win10.exe` with `python/` as the working directory) to regenerate `pikascript-api/` bindings and bytecode, then rebuild the firmware. There is no prebuild hook in the Keil project (`<BeforeMake>` is empty), so regeneration is manual. It also rewrites the gitignored-but-build-required `pikascript-api/main.py.o`, `pikaModules.py.a` and `__asset_pikaModules_py_a.c` (the latter is compiled into the firmware, so a stale copy silently ships stale bytecode).
+- `pikaPackage.exe` — the upstream package manager. **Do not use it here**: it re-resolves and downloads `requestment.txt` dependencies instead of regenerating bindings against the vendored `pikascript-core`, which can churn the core version. Use `rust-msc-latest-win10.exe`.
 - `requestment.txt` — PikaScript package versions (pikascript-core==v1.13.4, PikaStdLib==v1.13.4, _thread==v0.0.7, time==v0.2.2, math==v0.1.1, random==v0.1.4).
 - `main.py` — the default Python entry source that imports all modules.
 
@@ -292,9 +351,9 @@ In `matchineState.c` (`BatSendTimerCallback` at 100 ms):
 
 ## Working in this repo
 
-- When changing native behavior exposed to Python: edit `python/pikascript-lib/<mod>/_<mod>.c` (and/or the `Drivers/DataFile/<device>` C it calls), re-run `python/pikaPackage.exe`, then rebuild in Keil. Editing a `.pyi` without re-running pikaPackage leaves the C bindings stale.
+- When changing native behavior exposed to Python: edit `python/pikascript-lib/<mod>/_<mod>.c` (and/or the `Drivers/DataFile/<device>` C it calls), re-run `python/rust-msc-latest-win10.exe` from the `python/` directory, then rebuild in Keil. Editing a `.pyi` without regenerating leaves the C bindings stale.
 - When adding a new periodic action: create a FreeRTOS software timer in `MatChineStateTask` (mirroring the existing `xTimerCreate` + `xTimerStart` pattern) and signal work to the main loop via a new `EVENT_*` bit rather than doing the work in the timer callback.
 - Source files use GBK-encoded Chinese comments in places. Preserve encoding when editing existing C files to avoid mojibake in Keil.
-- **Device ID range**: `0xA1`–`0xB0` for sensors; `0x09` for USB port, `0x0A` for Bluetooth port. When adding a new device type, assign a new `DEV_ID_*`, add it to `identify_and_bind()`, `vDevControlTask`, and create a Python module binding.
+- **Device ID range**: sensors occupy `0xA1`–`0xB3` (`0xB0` grayv2, `0xB2` NFC, `0xB3` IR remote) plus `0xE0` for the electromagnetic sensor; `0x09` is the USB port, `0x0A` the Bluetooth port. `0xEF` is the reserved "device present but unidentified" sentinel, not a real device ID. When adding a new device type, assign a new `DEV_ID_*`, add it to `identify_and_bind()`, `vDevControlTask`, and create a Python module binding.
 - **Memory**: The FreeRTOS heap spans two regions — `ucHeapDCM` (64 KB DTCM, accessed via `__attribute__((section(".DTCM_Data")))`) and `ucHeapAXI` (256 KB AXI SRAM). `pvPortMalloc` auto-selects the region. Never use `malloc`/`free` from the standard library.
 - **PikaScript GIL**: `pika_platform_sleep_ms` releases the GIL (`pika_GIL_EXIT()`) during `vTaskDelay` so other Python threads can run. Blocking operations in native C bindings should follow the same pattern.

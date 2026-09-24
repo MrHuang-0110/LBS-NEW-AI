@@ -19,6 +19,7 @@
 #include "grayv2.h"
 #include "nfc_car.h"
 #include "ir.h"
+#include "elect_sensor.h"
 
 static uint8_t bat_level;
 
@@ -203,6 +204,10 @@ void vDevControlTask(void *pvParameters)
 								 
 								 case DEV_ID_IR:
 									 refsh_ir((DEV_IR*)base,base->data);
+								 break;
+								 
+								 case DEV_ID_ELECT_SENSOR:
+									 refsh_elect_sensor((DEV_ELECT_SENSOR*)base,base->data);
 								 break;
 							 }
 						}

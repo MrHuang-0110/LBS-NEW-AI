@@ -9,6 +9,7 @@
 #include "PikaCompiler.h"
 #include "grayv2.h"
 #include "blue.h"
+#include "elect_sensor.h"
 static _IO_FILE file;
 static _DEV_CFG cfgfile;
 SemaphoreHandle_t xFsMutex = NULL;
@@ -177,6 +178,10 @@ void getdevSoftware(uint8_t id,uint16_t *version)
 		
 		case DEV_ID_GRAY_V2:
 		*version = cfgfile.verGrayV2;
+		break;
+		
+		case DEV_ID_ELECT_SENSOR:
+		*version = cfgfile.verElectSensor;
 		break;
 		default:
 			*version = 0;
@@ -360,6 +365,12 @@ uint8_t _read_sensord_bin(uint8_t index,uint8_t *data,uint32_t *fileSize)
 						  res = ExternFlashReadFile("1:app/grayv2.bin",data);						 
 					    break;
 					 }
+					 case DEV_ID_ELECT_SENSOR:
+					 {
+						  res = getFileObjSize("1:app/elect_sensor.bin",fileSize);
+						  res = ExternFlashReadFile("1:app/elect_sensor.bin",data);
+							break;
+					 }
             default:break;
 	  }
 		return res;
@@ -392,6 +403,11 @@ bool _read_sensord_versionfile(uint8_t index,char *data)
 					 case DEV_ID_GRAY_V2:
 					 {
 						 sprintf((char*)data,"%d",cfgfile->verGrayV2);
+					    break;
+					 }
+					 case DEV_ID_ELECT_SENSOR:
+					 {
+						 sprintf((char*)data,"%d",cfgfile->verElectSensor);
 					    break;
 					 }
             default:break;
@@ -476,6 +492,7 @@ void fatfsInit(void)
 	readSoftwareVersion(&cfgfile.verGray,"1:version/gray.txt");
 	readSoftwareVersion(&cfgfile.verSmalMotor,"1:version/MiddleMotorVersion.txt");
 	readSoftwareVersion(&cfgfile.verGrayV2,"1:version/grayv2.txt");
+	readSoftwareVersion(&cfgfile.verElectSensor,"1:version/elect_sensor.txt");
 	readSoftwareVersion(&cfgfile.newAIversion,"1:version/Version.txt");
 	
  
